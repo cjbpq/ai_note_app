@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="utf-8" />
+    <title>{{ app_name }} · Prompt 管理登录</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f6f7fb;
+        --panel: #ffffffdd;
+        --primary: #2563eb;
+        --border: #e5e7eb;
+        font-family: "Segoe UI", "PingFang SC", "Microsoft Yahei", sans-serif;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: linear-gradient(135deg, #eef2ff, #fdf2f8);
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        color: #1f2937;
+      }
+      header {
+        padding: 1.6rem 2rem 1.2rem;
+        text-align: center;
+      }
+      header h1 {
+        margin: 0;
+        font-size: 1.6rem;
+        letter-spacing: 0.03em;
+        color: #1e3a8a;
+      }
+      header p {
+        margin: 0.6rem 0 0;
+        color: #475569;
+      }
+      main {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 1.5rem 3rem;
+      }
+      .glass {
+        background: var(--panel);
+        border-radius: 22px;
+        box-shadow: 0 25px 60px rgba(79, 70, 229, 0.18);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.55);
+      }
+      #login-panel {
+        width: min(480px, 100%);
+        padding: 2.6rem 2.4rem 2.4rem;
+      }
+      #login-panel h2 {
+        margin-top: 0;
+        margin-bottom: 0.9rem;
+        font-size: 1.25rem;
+      }
+      label {
+        display: block;
+        margin-bottom: 0.35rem;
+        font-weight: 600;
+      }
+      input {
+        width: 100%;
+        padding: 0.8rem 0.9rem;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        font-size: 0.95rem;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        font-family: inherit;
+      }
+      input:focus {
+        outline: none;
+        border-color: var(--primary);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+      }
+      button {
+        width: 100%;
+        border: none;
+        border-radius: 999px;
+        padding: 0.75rem 1.4rem;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        background: linear-gradient(135deg, #2563eb, #7c3aed);
+        color: #fff;
+        box-shadow: 0 18px 28px rgba(37, 99, 235, 0.35);
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+      button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+        box-shadow: none;
+      }
+      button:not(:disabled):hover {
+        transform: translateY(-1px) scale(1.01);
+      }
+      .field-group {
+        margin-bottom: 1.2rem;
+      }
+      .field-inline {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 1.2rem;
+        color: #475569;
+        font-size: 0.9rem;
+      }
+      .field-inline input[type="checkbox"] {
+        width: auto;
+        transform: scale(1.2);
+        accent-color: var(--primary);
+      }
+      .banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.8rem;
+        padding: 0.75rem 1rem;
+        background: linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(124, 58, 237, 0.12));
+        border-radius: 12px;
+        border: 1px solid rgba(37, 99, 235, 0.25);
+        color: #1e3a8a;
+        margin-bottom: 1.2rem;
+      }
+      .banner button {
+        width: auto;
+        padding: 0.45rem 0.9rem;
+        font-size: 0.85rem;
+        background: rgba(59, 130, 246, 0.85);
+        box-shadow: none;
+      }
+      .banner button:hover {
+        transform: translateY(-1px);
+      }
+      .hint {
+        font-size: 0.85rem;
+        color: #64748b;
+        margin-top: -0.2rem;
+        margin-bottom: 1.2rem;
+      }
+      .notification {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 0.9rem 1.15rem;
+        border-radius: 12px;
+        color: #fff;
+        font-weight: 600;
+        box-shadow: 0 18px 36px rgba(15, 23, 42, 0.25);
+        z-index: 999;
+        transition: opacity 0.3s ease;
+      }
+      .notification.success {
+        background: linear-gradient(135deg, #22c55e, #16a34a);
+      }
+      .notification.error {
+        background: linear-gradient(135deg, #f97316, #dc2626);
+      }
+      footer {
+        text-align: center;
+        padding: 1rem 0;
+        color: #94a3b8;
+        font-size: 0.85rem;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>{{ app_name }} · Prompt 管理控制台</h1>
+      <p>使用管理员密钥登录以管理 Doubao Prompt Profile</p>
+    </header>
+    <main>
+      <section id="login-panel" class="glass">
+        <h2>登录后台</h2>
+        <p class="hint">输入密钥与操作员名称。首次登录会绑定名称，用于记录审计日志。</p>
+        <form id="login-form">
+          <div class="field-group">
+            <label for="admin-key">管理员密钥</label>
+            <input id="admin-key" name="admin-key" type="password" placeholder="请输入密钥" required />
+          </div>
+          <div class="field-group">
+            <label for="admin-actor">操作员名称</label>
+            <input
+              id="admin-actor"
+              name="admin-actor"
+              type="text"
+              placeholder="仅支持中文、英文或数字"
+              required
+              pattern="[A-Za-z0-9\u4e00-\u9fa5]+"
+              title="仅支持中文、英文或数字"
+            />
+          </div>
+          <label class="field-inline">
+            <input id="auto-login" type="checkbox" />
+            <span>自动登录（仅在可信环境勾选）</span>
+          </label>
+          <div id="auto-login-banner" class="banner" hidden>
+            <span>将在 <strong id="auto-login-countdown">3</strong> 秒后自动进入控制台</span>
+            <button id="cancel-auto-login" type="button">取消自动登录</button>
+          </div>
+          <button type="submit">登录</button>
+        </form>
+      </section>
+    </main>
+    <footer>如需更换密钥，请联系平台管理员</footer>
+    <div id="notification" class="notification" style="display:none;"></div>
+    <script>
+      const API_BASE = "{{ api_base }}";
+      const CONSOLE_URL = "/admin/console";
+      const CONSOLE_AUTH_URL = "/admin/console?authorized=1";
+  const ACTOR_PATTERN = /^[A-Za-z0-9\u4e00-\u9fa5]+$/;
+  const AUTO_LOGIN_KEY = "adminAutoLogin";
+      const SESSION_FLAG = "adminSessionAuthorized";
+
+      const loginForm = document.getElementById("login-form");
+      const keyInput = document.getElementById("admin-key");
+      const actorInput = document.getElementById("admin-actor");
+  const autoLoginInput = document.getElementById("auto-login");
+      const autoLoginBanner = document.getElementById("auto-login-banner");
+      const autoLoginCountdownEl = document.getElementById("auto-login-countdown");
+      const cancelAutoLoginBtn = document.getElementById("cancel-auto-login");
+      const notificationEl = document.getElementById("notification");
+
+      let autoLoginTimeoutId = null;
+      let autoLoginIntervalId = null;
+
+      function showNotification(message, type = "success") {
+        notificationEl.textContent = message;
+        notificationEl.className = `notification ${type}`;
+        notificationEl.style.display = "block";
+        notificationEl.style.opacity = "1";
+        setTimeout(() => {
+          notificationEl.style.opacity = "0";
+          setTimeout(() => (notificationEl.style.display = "none"), 300);
+        }, 2400);
+      }
+
+      function persistCredentials(key, actor, autoLogin) {
+        localStorage.setItem("adminKey", key);
+        localStorage.setItem("adminActor", actor);
+        if (autoLogin) {
+          localStorage.setItem(AUTO_LOGIN_KEY, "1");
+        } else {
+          localStorage.removeItem(AUTO_LOGIN_KEY);
+        }
+      }
+
+      function clearCredentials() {
+        localStorage.removeItem("adminKey");
+        localStorage.removeItem("adminActor");
+        localStorage.removeItem(AUTO_LOGIN_KEY);
+        sessionStorage.removeItem(SESSION_FLAG);
+      }
+
+      function cancelScheduledAutoLogin(message) {
+        if (autoLoginTimeoutId) {
+          clearTimeout(autoLoginTimeoutId);
+          autoLoginTimeoutId = null;
+        }
+        if (autoLoginIntervalId) {
+          clearInterval(autoLoginIntervalId);
+          autoLoginIntervalId = null;
+        }
+        autoLoginBanner.hidden = true;
+        if (message) {
+          showNotification(message, "error");
+        }
+      }
+
+      function scheduleAutoLogin() {
+        cancelScheduledAutoLogin();
+        autoLoginBanner.hidden = false;
+        let countdown = 3;
+        autoLoginCountdownEl.textContent = countdown;
+        autoLoginIntervalId = setInterval(() => {
+          countdown -= 1;
+          if (countdown <= 0) {
+            clearInterval(autoLoginIntervalId);
+            autoLoginIntervalId = null;
+          }
+          autoLoginCountdownEl.textContent = Math.max(countdown, 0);
+        }, 1000);
+        autoLoginTimeoutId = setTimeout(() => {
+          autoLoginTimeoutId = null;
+          autoLoginBanner.hidden = true;
+          sessionStorage.setItem(SESSION_FLAG, "1");
+          window.location.href = CONSOLE_AUTH_URL;
+        }, 3000);
+      }
+
+      async function attemptLogin(key, actor) {
+        const headers = new Headers();
+        headers.set("Content-Type", "application/json");
+        headers.set("X-Admin-Key", key);
+        headers.set("X-Admin-Actor", actor);
+
+        const response = await fetch(`${API_BASE}/session`, {
+          method: "POST",
+          headers,
+        });
+        if (!response.ok) {
+          let detail = "登录失败";
+          try {
+            const payload = await response.json();
+            detail = payload.detail || detail;
+          } catch (err) {
+            detail = response.statusText || detail;
+          }
+          throw new Error(detail);
+        }
+        return response.json();
+      }
+
+      loginForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const key = keyInput.value.trim();
+        const actor = actorInput.value.trim();
+        const autoLogin = autoLoginInput.checked;
+        if (!key) {
+          showNotification("密钥不能为空", "error");
+          return;
+        }
+        if (!ACTOR_PATTERN.test(actor)) {
+          showNotification("操作员名称仅支持中文、英文或数字", "error");
+          return;
+        }
+        loginForm.querySelector("button").disabled = true;
+        try {
+          await attemptLogin(key, actor);
+          persistCredentials(key, actor, autoLogin);
+          const message = autoLogin ? "登录成功，已启用自动登录" : "登录成功，下次访问需重新登录";
+          showNotification(`${message}，即将跳转`);
+          sessionStorage.setItem(SESSION_FLAG, "1");
+          setTimeout(() => {
+            window.location.href = CONSOLE_AUTH_URL;
+          }, 350);
+        } catch (error) {
+          showNotification(error.message, "error");
+          clearCredentials();
+          loginForm.querySelector("button").disabled = false;
+        }
+      });
+
+      (function preloadStoredCredentials() {
+        const storedKey = localStorage.getItem("adminKey");
+        const storedActor = localStorage.getItem("adminActor");
+        const shouldAutoLogin = localStorage.getItem(AUTO_LOGIN_KEY) === "1";
+        if (storedKey) {
+          keyInput.value = storedKey;
+        }
+        if (storedActor && ACTOR_PATTERN.test(storedActor)) {
+          actorInput.value = storedActor;
+        } else if (storedActor) {
+          localStorage.removeItem("adminActor");
+        }
+        autoLoginInput.checked = shouldAutoLogin;
+        if (storedKey && storedActor && shouldAutoLogin) {
+          scheduleAutoLogin();
+        }
+      })();
+
+      cancelAutoLoginBtn.addEventListener("click", () => {
+        cancelScheduledAutoLogin("已取消自动登录");
+        autoLoginInput.checked = false;
+        localStorage.removeItem(AUTO_LOGIN_KEY);
+      });
+
+      autoLoginInput.addEventListener("change", () => {
+        if (!autoLoginInput.checked) {
+          cancelScheduledAutoLogin();
+          localStorage.removeItem(AUTO_LOGIN_KEY);
+        }
+      });
+    </script>
+  </body>
+</html>

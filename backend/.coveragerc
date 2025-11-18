@@ -1,0 +1,31 @@
+# Coverage.py 覆盖率配置文件
+# 学习要点: .coveragerc 定义覆盖率统计规则和报告格式
+# 作用: 指定统计源码目录, 排除无需统计文件, 配置报告输出
+
+[run]
+# 统计覆盖率的源码目录
+source = app
+
+# 排除不需要统计的文件模式
+omit =
+    */tests/*              # 测试文件本身
+    */migrations/*         # 数据库迁移脚本
+    */__pycache__/*        # Python 字节码缓存
+    */venv/*               # 虚拟环境
+    */site-packages/*      # 第三方库
+    app/main.py            # FastAPI 启动文件 (主要是配置代码)
+
+[report]
+# 精确度: 小数点后 2 位
+precision = 2
+
+# 排序: 按覆盖率从低到高排序 (方便识别需要补充测试的模块)
+sort = Cover
+
+# 跳过覆盖率 100% 的文件 (减少报告噪音)
+skip_covered = False
+
+# 学习要点:
+# - source: 指定统计目录, 避免统计第三方库代码
+# - omit: 排除测试文件和迁移脚本, 专注业务代码覆盖率
+# - sort=Cover: 优先显示低覆盖率模块, 指导测试补充方向
