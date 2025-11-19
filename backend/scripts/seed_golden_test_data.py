@@ -84,34 +84,35 @@ def seed_golden_test_data():
         # 固定时间 (避免 created_at 变化)
         fixed_time = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
-        # 固定笔记数据
+        # 固定笔记数据（使用标准 UUID 格式）
+        # 学习要点: UUID 格式保证 ID 全局唯一, Pydantic 会验证 UUID 格式
         test_notes = [
             {
-                "id": "note-001",
+                "id": "00000000-0000-0000-0000-000000000001",  # 固定 UUID
                 "title": "Python 学习笔记",
                 "original_text": "学习 Python 基础语法和面向对象编程",
                 "category": "学习笔记"
             },
             {
-                "id": "note-002",
+                "id": "00000000-0000-0000-0000-000000000002",  # 固定 UUID
                 "title": "FastAPI 入门教程",
                 "original_text": "FastAPI 是一个现代化的 Python Web 框架",
                 "category": "技术文档"
             },
             {
-                "id": "note-003",
+                "id": "00000000-0000-0000-0000-000000000003",  # 固定 UUID
                 "title": "测试驱动开发实践",
                 "original_text": "TDD 核心理念: 先写测试, 再写代码",
                 "category": "开发笔记"
             },
             {
-                "id": "note-004",
+                "id": "00000000-0000-0000-0000-000000000004",  # 固定 UUID
                 "title": "SQL 注入防护方法",
                 "original_text": "使用 ORM 参数化查询防止 SQL 注入攻击",
                 "category": "安全笔记"
             },
             {
-                "id": "note-005",
+                "id": "00000000-0000-0000-0000-000000000005",  # 固定 UUID
                 "title": "黄金文件测试指南",
                 "original_text": "黄金测试验证重构后 API 行为不变",
                 "category": "测试笔记"

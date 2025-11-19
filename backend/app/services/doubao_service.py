@@ -91,14 +91,14 @@ class DoubaoVisionService:
             {
                 "role": "system",
                 "content": [
-                    {"type": "input_text", "text": system_prompt},
+                    {"type": "text", "text": system_prompt},
                 ],
             },
             {
                 "role": "user",
                 "content": [
                     *image_contents,
-                    {"type": "input_text", "text": user_prompt},
+                    {"type": "text", "text": user_prompt},
                 ],
             },
         ]
@@ -107,22 +107,30 @@ class DoubaoVisionService:
 
         request_kwargs: Dict[str, Any] = {
             "model": settings.DOUBAO_MODEL_ID,
-            "input": input_payload,
-            "store": False,
-            "text": schema_payload,
+            "messages": input_payload,
         }
 
-        if thinking or settings.DOUBAO_THINKING_MODE:
-            thinking_type = thinking or settings.DOUBAO_THINKING_MODE
-            if thinking_type:
-                request_kwargs["thinking"] = {"type": thinking_type}
+        # 添加 JSON schema（如果启用）
+        if schema_payload:
+            request_kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "structured_note",
+                    "schema": schema_payload,
+                    "strict": True
+                }
+            }
+
+        # 控制思考模式（根据官方文档直接传递 thinking 参数）
+        thinking_type = thinking or settings.DOUBAO_THINKING_MODE or "disabled"
+        request_kwargs["thinking"] = {"type": thinking_type}
 
         tokens_limit = max_completion_tokens or settings.DOUBAO_MAX_COMPLETION_TOKENS
         if tokens_limit:
-            request_kwargs["max_output_tokens"] = tokens_limit
+            request_kwargs["max_tokens"] = tokens_limit
 
         try:
-            response = client.responses.create(**{k: v for k, v in request_kwargs.items() if v is not None})
+            response = client.chat.completions.create(**{k: v for k, v in request_kwargs.items() if v is not None})
         except Exception as exc:  # noqa: BLE001
             logger.exception("Doubao request failed")
             raise DoubaoServiceError(str(exc)) from exc
@@ -178,30 +186,32 @@ class DoubaoVisionService:
             {
                 "role": "system",
                 "content": [
-                    {"type": "input_text", "text": system_prompt},
+                    {"type": "text", "text": system_prompt},
                 ],
             },
             {
                 "role": "user",
                 "content": [
                     *image_contents,
-                    {"type": "input_text", "text": user_prompt},
+                    {"type": "text", "text": user_prompt},
                 ],
             },
         ]
 
         request_kwargs: Dict[str, Any] = {
             "model": settings.DOUBAO_MODEL_ID,
-            "input": input_payload,
-            "store": False,
+            "messages": input_payload,
         }
+
+        # 禁用思考模式（根据官方文档直接传递 thinking 参数）
+        request_kwargs["thinking"] = {"type": "disabled"}
 
         tokens_limit = settings.DOUBAO_MAX_COMPLETION_TOKENS
         if tokens_limit:
-            request_kwargs["max_output_tokens"] = tokens_limit
+            request_kwargs["max_tokens"] = tokens_limit
 
         try:
-            response = client.responses.create(**{k: v for k, v in request_kwargs.items() if v is not None})
+            response = client.chat.completions.create(**{k: v for k, v in request_kwargs.items() if v is not None})
         except Exception as exc:  # noqa: BLE001
             logger.exception("Doubao plain-text request failed")
             raise DoubaoServiceError(str(exc)) from exc
@@ -234,9 +244,11 @@ class DoubaoVisionService:
             detail_value = "auto"
 
         return {
-            "type": "input_image",
-            "image_url": content_url,
-            "detail": detail_value,
+            "type": "image_url",
+            "image_url": {
+                "url": content_url,
+                "detail": detail_value,
+            }
         }
 
     def _response_to_dict(self, response: Any) -> Dict[str, Any]:
@@ -257,15 +269,17 @@ class DoubaoVisionService:
         raise DoubaoServiceError("Unsupported response type from Doubao SDK")
 
     def _collect_message_texts(self, payload: Dict[str, Any]) -> List[str]:
-        output_items = payload.get("output", [])
+        # 标准 Chat Completions API 响应格式
+        # {"choices": [{"message": {"role": "assistant", "content": "..."}}]}
         message_texts: List[str] = []
-        for item in output_items:
-            if item.get("type") != "message":
-                continue
-            for segment in item.get("content", []):
-                text_value = segment.get("text") or segment.get("output_text")
-                if text_value:
-                    message_texts.append(text_value)
+
+        choices = payload.get("choices", [])
+        for choice in choices:
+            message = choice.get("message", {})
+            content = message.get("content")
+            if content:
+                message_texts.append(content)
+
         return message_texts
 
     def _extract_note_payload(self, payload: Dict[str, Any]) -> tuple[Dict[str, Any], str]:
