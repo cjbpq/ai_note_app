@@ -10,8 +10,6 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.api import api_router
-from app.api.admin.router import router as admin_router
-from app.api.admin.ui import ui_router as admin_ui_router
 from app.core.config import settings
 from app.core.exceptions import ServiceError
 from app.core.logging_config import setup_logging
@@ -164,8 +162,6 @@ async def service_error_handler(request: Request, exc: ServiceError):
 
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
-app.include_router(admin_router)
-app.include_router(admin_ui_router)
 
 
 @app.get("/")

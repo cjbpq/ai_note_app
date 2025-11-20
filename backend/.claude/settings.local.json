@@ -27,7 +27,8 @@
       "SlashCommand(/workflow:status)",
       "Bash(pip install:*)",
       "Bash(done)",
-      "SlashCommand(/workflow:session:complete)"
+      "SlashCommand(/workflow:session:complete)",
+      "Bash(./venv/Scripts/python:*)"
     ],
     "deny": [],
     "ask": []

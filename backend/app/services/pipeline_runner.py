@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Iterable, List
 
 from sqlalchemy.orm import Session
@@ -112,6 +113,16 @@ async def process_note_job(
         job.note_id = str(saved_note.id)
         _update_status(db, job, "PERSISTED")
         logger.info("Successfully processed upload job %s", job_id)
+
+        # Cleanup: Delete the uploaded image file
+        if storage_path:
+            try:
+                file_path = Path(storage_path)
+                if file_path.exists():
+                    file_path.unlink()
+                    logger.info("Deleted temporary image file: %s", storage_path)
+            except Exception as e:
+                logger.warning("Failed to delete image file %s: %s", storage_path, e)
 
     except Exception as exc:  # noqa: BLE001
         logger.exception("Unexpected failure while processing job %s", job_id)

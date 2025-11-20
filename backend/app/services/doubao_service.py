@@ -4,6 +4,7 @@ import base64
 import json
 import logging
 import mimetypes
+import re
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -282,6 +283,57 @@ class DoubaoVisionService:
 
         return message_texts
 
+    def _clean_json_string(self, text: str) -> str:
+        """Clean JSON string from markdown code blocks and other noise."""
+        text = text.strip()
+        
+        # Strategy 1: Look for ```json ... ``` block specifically
+        json_block = re.search(r"```json\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
+        if json_block:
+            return json_block.group(1).strip()
+
+        # Strategy 2: Look for any code block ``` ... ``` that looks like JSON
+        code_block = re.search(r"```\s*(.*?)\s*```", text, re.DOTALL)
+        if code_block:
+            content = code_block.group(1).strip()
+            if content.startswith("{"):
+                return content
+
+        # Strategy 3: Find outermost braces
+        first_brace = text.find("{")
+        last_brace = text.rfind("}")
+        if first_brace != -1 and last_brace != -1:
+            return text[first_brace : last_brace + 1]
+            
+        return text
+
+    def _repair_json(self, json_str: str) -> str:
+        """Attempt to repair common JSON errors."""
+        # 1. Remove trailing commas in objects/arrays
+        json_str = re.sub(r",\s*([\]}])", r"\1", json_str)
+        
+        # 2. Escape invalid backslashes (e.g. \p in \pi, \s in \sin)
+        # We want to match backslash that is NOT followed by a valid escape char
+        # Valid JSON escapes: " \ / b f n r t u
+        # However, in LaTeX context:
+        # \b (backspace) -> likely \beta
+        # \f (formfeed) -> likely \frac
+        # \r (return) -> likely \right
+        # \t (tab) -> likely \tan, \theta
+        # So we SHOULD escape b, f, r, t to preserve them as literal backslashes for LaTeX.
+        # We MUST preserve n (newline) for text formatting.
+        # We MUST preserve " \ / for JSON structure.
+        
+        def replace_escape(match):
+            char = match.group(1)
+            # Preserve structural escapes and newline
+            if char in '"\\/n':
+                return match.group(0)
+            # Escape everything else (including b, f, r, t, u, and invalid chars like p, s, c)
+            return r"\\" + char
+
+        return re.sub(r"\\(.)", replace_escape, json_str)
+
     def _extract_note_payload(self, payload: Dict[str, Any]) -> tuple[Dict[str, Any], str]:
         message_texts = self._collect_message_texts(payload)
 
@@ -289,11 +341,18 @@ class DoubaoVisionService:
             raise DoubaoServiceError("Doubao response did not contain assistant message text")
 
         joined = "\n".join(message_texts).strip()
+        cleaned_json = self._clean_json_string(joined)
+        
         try:
-            note_data = json.loads(joined)
-        except json.JSONDecodeError as exc:
-            logger.error("Failed to decode Doubao JSON output: %s", joined)
-            raise DoubaoServiceError("Doubao response is not valid JSON") from exc
+            note_data = json.loads(cleaned_json)
+        except json.JSONDecodeError:
+            # Try repairing
+            repaired_json = self._repair_json(cleaned_json)
+            try:
+                note_data = json.loads(repaired_json)
+            except json.JSONDecodeError as exc:
+                logger.error("Failed to decode Doubao JSON output. Raw: %s, Cleaned: %s, Repaired: %s", joined, cleaned_json, repaired_json)
+                raise DoubaoServiceError("Doubao response is not valid JSON") from exc
 
         raw_text = note_data.get("raw_text") or note_data.get("transcript", "")
         return note_data, raw_text

@@ -183,8 +183,8 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
     "math": {
         "display_name": "数学解析",
         "aliases": ["数学", "数理化", "math", "mathematics"],
-        "system_template": "你是一名数学竞赛教练，擅长解析题干、公式与解题步骤。务必确保符号与公式正确，逻辑推导严谨。",
-        "user_template": "请提取题干与结论，raw_text 保留完整原文。formulas 字段需列出关键公式，包含 formula 与 explanation。worked_examples 为数组，记录每道例题的 problem 与 solution_steps（使用有序列表描述步骤）。sections 按知识点或题目分组；key_points 总结核心思想；study_advice 给出练习与巩固建议。当前主题：{note_type}；标签：{tags_text}。",
+        "system_template": "你是一名数学竞赛教练，擅长解析题干、公式与解题步骤。务必确保符号与公式正确，逻辑推导严谨。所有数学公式请务必使用 LaTeX 格式（行内公式用 $...$ 包裹，独立公式用 $$...$$ 包裹）。注意：在 JSON 字符串中，LaTeX 的反斜杠必须双重转义（例如 \\\\frac 而非 \\frac）。",
+        "user_template": "请提取题干与结论，raw_text 保留完整原文（公式用 LaTeX）。formulas 字段需列出关键公式，包含 formula（LaTeX 格式）与 explanation。worked_examples 为数组，记录每道例题的 problem 与 solution_steps（使用有序列表描述步骤，公式用 LaTeX）。sections 按知识点或题目分组；key_points 总结核心思想；study_advice 给出练习与巩固建议。当前主题：{note_type}；标签：{tags_text}。",
         "schema": _extend_schema(
             base=_base_schema(),
             extra_properties={
@@ -259,8 +259,8 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
     "physics": {
         "display_name": "物理要点",
         "aliases": ["物理", "physics", "science_physics"],
-        "system_template": "你是一位物理竞赛教练。请解析图片中的知识点、定律与实验步骤，确保公式与单位准确。",
-        "user_template": "raw_text 保存原文。principles 列出核心定律（name 与 explanation）。equations 数组包含 symbol、formula、usage。applications 记录实际应用场景，包含 scenario 与 explanation。sections 用于组织知识结构；key_points 与 study_advice 聚焦理解与实践。当前主题：{note_type}；标签：{tags_text}。",
+        "system_template": "你是一位物理竞赛教练。请解析图片中的知识点、定律与实验步骤，确保公式与单位准确。所有数学公式请务必使用 LaTeX 格式（行内公式用 $...$ 包裹，独立公式用 $$...$$ 包裹）。注意：在 JSON 字符串中，LaTeX 的反斜杠必须双重转义（例如 \\\\frac 而非 \\frac）。",
+        "user_template": "raw_text 保存原文（公式用 LaTeX）。principles 列出核心定律（name 与 explanation）。equations 数组包含 symbol、formula（LaTeX 格式）、usage。applications 记录实际应用场景，包含 scenario 与 explanation。sections 用于组织知识结构；key_points 与 study_advice 聚焦理解与实践。当前主题：{note_type}；标签：{tags_text}。",
         "schema": _extend_schema(
             base=_base_schema(),
             extra_properties={
