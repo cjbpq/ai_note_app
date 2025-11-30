@@ -14,6 +14,8 @@
 
 import logging
 import sys
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Optional
 
 from app.core.config import settings
@@ -25,8 +27,14 @@ def setup_logging() -> None:
     学习要点:
     - logging.basicConfig 配置根日志器
     - StreamHandler 输出到控制台
-    - 可扩展: 添加 FileHandler 输出到文件, RotatingFileHandler 日志轮转
+    - RotatingFileHandler 输出到文件并自���轮转（防止文件过大）
     - 第三方库日志级别: 设置为 WARNING 避免过多日志
+
+    日志文件配置:
+    - 文件路径: logs/app.log
+    - 单文件最大: 10MB
+    - 保留文件数: 5 个（总共最多 50MB）
+    - 自动轮转: 超过 10MB 自动创建新文件
     """
     # 根日志器配置
     log_level = logging.DEBUG if settings.DEBUG else logging.INFO
@@ -34,13 +42,26 @@ def setup_logging() -> None:
     # 日志格式: 时间 - 模块名 - 级别 - 消息
     log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
+    # 确保日志目录存在
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+
+    # 配置日志处理器
+    handlers = [
+        logging.StreamHandler(sys.stdout),  # 输出到控制台
+        RotatingFileHandler(
+            filename=log_dir / "app.log",
+            maxBytes=10 * 1024 * 1024,  # 10MB
+            backupCount=5,  # 保留 5 个备份文件
+            encoding="utf-8",
+        ),
+    ]
+
     # 基础配置
     logging.basicConfig(
         level=log_level,
         format=log_format,
-        handlers=[
-            logging.StreamHandler(sys.stdout),  # 输出到控制台
-        ],
+        handlers=handlers,
     )
 
     # 设置第三方库日志级别 (避免过多日志)

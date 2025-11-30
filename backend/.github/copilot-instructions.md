@@ -1,47 +1,85 @@
-```instructions
 # AI Agent Guide for AI Note Backend
 
-## 🧭 Architecture Snapshot
-- **Entry Point**: `app/main.py` uses `lifespan` for startup (DB schema, logging).
-- **Routing**: `app/api/v1/api.py` uses `_safe_include(...)` to register routers (e.g., `/library`, `/notes`). Use this helper to prevent import errors from crashing the app.
-- **Database**: `app/database.py` provides `SessionLocal` (for background tasks) and `get_db` (dependency for API requests).
-- **Config**: `app/core/config.py` uses Pydantic `BaseSettings`. Sensitive keys (`DOUBAO_API_KEY`, `SECRET_KEY`) must be env vars.
+## 🧭 Architecture Overview
+- **Entry Point**: `app/main.py` — lifespan context manager for startup (DB init, logging via `setup_logging()`)
+- **Routing**: `app/api/v1/api.py` — use `_safe_include(module, attr, prefix, tags)` to register routers (gracefully handles import errors)
+- **Database**: `app/database.py` — `SessionLocal` for background tasks, `get_db` dependency for API requests
+- **Config**: `app/core/config.py` — Pydantic `BaseSettings`; `SECRET_KEY` is required (min 32 chars), `DOUBAO_API_KEY` from env
 
-## 📸 Core Pipeline: Upload → AI Note
-1. **Upload**: `InputPipelineService.create_job` validates/stores images (local `uploaded_images/`).
-2. **Enqueue**: `POST /api/v1/library/notes/from-image` creates an `UploadJob` (status `QUEUED`) and spawns a background task `process_note_job`.
-3. **Processing** (`app/services/pipeline_runner.py`):
-   - **Session**: Manually opens/closes `SessionLocal()`.
-   - **AI**: Calls `doubao_service.generate_structured_note` (wraps Volcengine SDK).
-   - **Persistence**: Saves result via `NoteService.create_note`.
-   - **Status**: Updates job status (`RECEIVED` → `AI_PENDING` → `AI_DONE` → `PERSISTED`).
-   - **Errors**: Uses `job.append_error(...)` and commits to DB so SSE clients receive updates.
+## 📸 Core Pipeline: Image → AI Note
+```
+POST /api/v1/library/notes/from-image
+    → InputPipelineService.create_job() [validates, stores to uploaded_images/]
+    → UploadJob created (status=QUEUED)
+    → BackgroundTasks.add_task(process_note_job, ...)
+```
+**`pipeline_runner.py` flow**:
+1. Open `SessionLocal()` manually (NOT `Depends(get_db)`)
+2. Check `doubao_service.availability_status()` → fail fast if unavailable
+3. Call `doubao_service.generate_structured_note()` via `asyncio.to_thread()`
+4. Save via `NoteService.create_note()`, update job status: `AI_PENDING → AI_DONE → PERSISTED`
+5. On error: `job.append_error({stage, error})`, set status=`FAILED`, commit immediately
 
-## 🔧 Key Developer Workflows
-- **Run Dev Server**: `start.bat` (runs `uvicorn app.main:app --reload`).
-- **Run Tests**: `pytest` (configured in `pytest.ini` with coverage requirements).
-  - **Markers**: Use `@pytest.mark.unit`, `@pytest.mark.integration`.
-  - **Coverage**: Fails if under 70% (`--cov-fail-under=70`).
-- **Debug**: Use `debug_request.py` for end-to-end API reproduction.
+## 🔧 Developer Workflows
+| Task | Command |
+|------|---------|
+| Run dev server | `start.bat` or `uvicorn app.main:app --reload` |
+| Run all tests | `pytest` (auto-runs with coverage) |
+| Unit tests only | `pytest -m unit` |
+| Security tests | `pytest tests/security/ -v` |
+| Golden baseline | `pytest tests/golden/ --golden-update` |
+| Check coverage | Open `htmlcov/index.html` after pytest |
 
-## 📏 Project Conventions
-- **Router Registration**: Always use `_safe_include` in `app/api/v1/api.py`.
-- **Background Tasks**:
-  - MUST use `SessionLocal()` (not `Depends(get_db)`).
-  - MUST catch exceptions, log them, and update job status to `FAILED`.
-  - Update `updated_at` with `datetime.now(timezone.utc)` for SSE compatibility.
-- **Doubao Integration**:
-  - Use `app/services/doubao_service.py` wrapper, do not use SDK directly in business logic.
-  - Check `doubao_service.availability_status()` before starting AI tasks.
-- **Prompting**: Use `PromptProfile` system (`app/services/prompt_profiles.py`) instead of hardcoded strings.
+**Test markers**: `@pytest.mark.unit`, `@pytest.mark.integration`, `@pytest.mark.security`, `@pytest.mark.golden`
+**Coverage gate**: Fails if < 70% (`--cov-fail-under=70` in `pytest.ini`)
 
-## 🔌 External Integrations (Doubao/Volcengine)
-- **SDK**: `volcengine-python-sdk[ark]`.
-- **Auth**: Requires `DOUBAO_API_KEY` (or `ARK_API_KEY`) OR `DOUBAO_ACCESS_KEY_ID`/`SECRET_KEY`.
-- **Configuration**: Supports "Thinking Mode" via `DOUBAO_THINKING_MODE` env var.
+## 📏 Code Conventions
+### Router Registration
+```python
+# In app/api/v1/api.py — ALWAYS use _safe_include
+_safe_include("app.api.v1.endpoints.library", "router", prefix="/library", tags=["Library"])
+```
+
+### Background Tasks
+```python
+# ✅ Correct: manual session, explicit error handling
+db = SessionLocal()
+try:
+    # work...
+    job.status = "PERSISTED"
+    job.updated_at = datetime.now(timezone.utc)  # NOT utcnow()
+    db.commit()
+finally:
+    db.close()
+```
+
+### Exception Handling
+- Raise `ServiceError` subclasses (`DoubaoServiceUnavailable`, `NoteNotFoundError`) — caught by global handler in `main.py`
+- Use dependency injection for pre-checks: `dependencies=[Depends(check_doubao_available)]`
+
+### Pydantic v2
+- Use `.model_dump()` not `.dict()`
+- Use `model_validator(mode="after")` not `@validator`
+
+## 🤖 AI/Doubao Integration
+- **Wrapper**: Always use `doubao_service` singleton from `app/services/doubao_service.py`
+- **Prompts**: Use `PromptProfile` system (`app/services/prompt_profiles.py`) — supports `general`, `math`, `english`, `physics`, `classical_chinese`
+- **JSON Schema**: Controlled by `DOUBAO_USE_JSON_SCHEMA` env var
+- **Auth priority**: `DOUBAO_API_KEY` > `ARK_API_KEY` > `VOLC_ACCESSKEY`+`VOLC_SECRETKEY`
+
+## 🗂 Key Files Reference
+| Purpose | File |
+|---------|------|
+| App entry & lifecycle | `app/main.py` |
+| Router aggregation | `app/api/v1/api.py` |
+| AI pipeline runner | `app/services/pipeline_runner.py` |
+| Doubao wrapper | `app/services/doubao_service.py` |
+| Prompt templates | `app/services/prompt_profiles.py`, `app/prompts/profiles.json` |
+| Custom exceptions | `app/core/exceptions.py` |
+| Test fixtures | `tests/conftest.py`, `tests/factories.py` |
 
 ## 🚨 Common Pitfalls
-- **Circular Imports**: Use `TYPE_CHECKING` imports for models/schemas to avoid cycles.
-- **Async/Sync**: DB operations are synchronous (SQLAlchemy); run them in threads if blocking the event loop is a concern (though current pipeline runs in background task).
-- **Static Files**: Images are served from `/static` (mapped to `uploaded_images/`).
-```
+- **Circular imports**: Use `TYPE_CHECKING` for model/schema imports
+- **utcnow() deprecated**: Use `datetime.now(timezone.utc)` (Python 3.12+)
+- **Static files**: Served from `/static` → mapped to `uploaded_images/`
+- **Missing cleanup**: `pipeline_runner.py` auto-deletes image after success — check `Path.unlink()` behavior if debugging

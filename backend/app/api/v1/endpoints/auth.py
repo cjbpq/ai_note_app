@@ -1,15 +1,23 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
-from app.core.security import create_access_token
+from app.core.security import create_access_token, verify_token
 from app.database import get_db
-from app.models.user import User, UserCreate, UserLogin, UserResponse, Token
+from app.models.user import User, UserCreate, UserLogin, UserResponse, Token, TokenInfo
 from app.services.user_service import UserService
 from app.core.dependencies import get_current_user
+from app.core.config import settings
 
 LOGIN_SUCCESS_EXAMPLE = {
     "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
     "token_type": "bearer",
+}
+
+TOKEN_INFO_EXAMPLE = {
+    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "token_type": "bearer",
+    "expires_in": 604800,
+    "expires_at": "2025-12-07T12:00:00Z",
 }
 
 
@@ -84,3 +92,44 @@ async def delete_current_user(
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
     return {"message": "用户已注销"}
+
+
+@router.post(
+    "/refresh",
+    response_model=TokenInfo,
+    summary="刷新访问令牌",
+    description=(
+        "使用有效的访问令牌获取新的令牌，无需重新输入用户名密码。"
+        "前端可在 Token 即将过期前调用此接口续期。"
+    ),
+    responses={
+        200: {
+            "description": "刷新成功",
+            "content": {"application/json": {"example": TOKEN_INFO_EXAMPLE}},
+        },
+        401: {"description": "令牌无效或已过期"},
+    },
+)
+async def refresh_token(current_user: User = Depends(get_current_user)):
+    """刷新 Token
+
+    使用场景:
+    - 前端检测到 Token 即将过期时自动调用
+    - 用户长时间活跃时定期刷新
+    - 无需用户重新输入密码
+
+    注意: 此接口仍需要有效的 Token 才能调用，
+    如果 Token 已完全过期，用户需要重新登录。
+    """
+    from datetime import datetime, timezone, timedelta
+
+    token = create_access_token({"sub": current_user.username})
+    expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60  # 转换为秒
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "expires_in": expires_in,
+        "expires_at": expires_at.isoformat(),
+    }

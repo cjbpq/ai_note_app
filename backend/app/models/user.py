@@ -53,5 +53,17 @@ class Token(BaseModel):
     token_type: str
 
 
+class TokenInfo(BaseModel):
+    """带有过期时间信息的 Token 响应
+
+    用于 /auth/refresh 接口，前端可以根据 expires_in 或 expires_at
+    决定何时刷新 Token。
+    """
+    access_token: str
+    token_type: str
+    expires_in: int  # Token 有效期（秒）
+    expires_at: str  # Token 过期时间（ISO 8601 格式）
+
+
 class TokenData(BaseModel):
     username: Optional[str] = None
