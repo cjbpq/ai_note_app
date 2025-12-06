@@ -1,0 +1,136 @@
+//颜色设置：
+//1.主题色
+@brand-color: #57bbae;
+@brand-hover: #4aa396;
+//2.容器的背景色
+@bg-page: #f5f7fa;
+@bg-card: #ffffff;
+//3.边框颜色
+@border-color: #e1e4e8;
+//4.文字颜色
+@text-secondary: #7f8c8d;
+@error-color: #ff4d4f;
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+a {
+  text-decoration: none;
+  color: @text-secondary;
+}
+body {
+  background-color: @bg-page;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  margin: 0;
+  padding-top: 20px;
+}
+li {
+  list-style: none;
+}
+
+.wrapper {
+  margin: auto;
+  margin-top: 80px;
+  width: 400px;
+  height: 648px;
+  background-color: #e5e7eb;
+  padding: 40px;
+  border-radius: 8px;
+  background-color: transparent; // 建议去掉 wrapper 的灰色背景，直接让里面的 container 显示
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); // 加上柔和的阴影
+
+  .container {
+    // border-radius: 8px;
+    width: 100%;
+    height: 100%;
+    // background-color: green;
+    overflow: hidden;
+    h1 {
+      text-align: center;
+      font-size: 24px;
+    }
+    .nav ul {
+      display: flex;
+      width: 100%;
+      justify-content: space-between;
+      height: 32px;
+      line-height: 32px;
+      .active {
+        background-color: @bg-card;
+      }
+      li {
+        border-radius: 4px;
+        flex: 1;
+        text-align: center;
+        &:hover {
+          cursor: pointer;
+          // background-color: @brand-hover;
+        }
+      }
+    }
+    .mode_register {
+      transform: translateX(-50%);
+    }
+    .mid ul {
+      display: flex;
+      width: 200%;
+      height: 616px;
+      // transition: all 0.3s ease;
+      li {
+        display: flex;
+        flex-direction: column;
+        // justify-content: space-between;
+        width: 320px;
+        height: 100%;
+        background-color: @bg-card;
+        padding: 32px;
+        p {
+          font-size: 16px;
+        }
+        div {
+          margin-bottom: 32px;
+        }
+        input {
+          //这里的input输入框总感觉很难看 不知道怎么处理
+          width: 100%; // 撑满容器
+          height: 40px; // 稍微高一点，32px 对现代网页来说有点窄
+          padding: 0 12px; // 内部留白，文字不要顶着边框
+          border: 1px solid @border-color; // 使用你定义的浅灰色
+          border-radius: 6px; // 圆角让界面更亲和
+          outline: none; // 去掉浏览器默认的黑/蓝框
+          transition: all 0.3s; // 让交互有动画
+
+          // 关键：聚焦时的状态
+          &:focus {
+            border-color: @border-color; // 聚焦变主题色
+            box-shadow: 0 0 0 3px fade(@brand-color, 20%); // 加一层淡淡的光晕
+          }
+        }
+
+        button {
+          width: 100%; // 撑满
+          height: 40px;
+          // background-color: @brand-color;
+          color: white;
+          border: none; // 去掉默认边框
+          border-radius: 6px;
+          font-size: 16px;
+          cursor: pointer; // 鼠标放上去变小手
+          transition: background-color 0.3s;
+
+          // 禁用状态（比如正在提交）
+          &:disabled {
+            background-color: lighten(@brand-color, 20%);
+            cursor: not-allowed;
+          }
+        }
+        .message {
+          color: @error-color;
+          font-size: small;
+        }
+      }
+    }
+  }
+}

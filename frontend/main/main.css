@@ -1,0 +1,273 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+a {
+  text-decoration: none;
+  color: #7f8c8d;
+}
+body {
+  background-color: #f5f7fa;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  margin: 0;
+}
+li {
+  list-style: none;
+}
+.hidden {
+  display: none;
+}
+.my_container {
+  width: 100vw;
+  /* 100% 的视口宽度 */
+  height: 100vh;
+  /* 100% 的视口高度 */
+  background-color: #f5f7fa;
+  /* 为了方便看到效果，加个背景色 */
+  display: flex;
+  overflow: hidden;
+}
+.my_container .left {
+  width: 100px;
+  height: 100%;
+  background-color: #57bbae;
+  flex: 2;
+  overflow-y: auto;
+  /* 针对 Webkit 内核浏览器 (Chrome, Edge, Safari) */
+}
+.my_container .left::-webkit-scrollbar {
+  display: none;
+  /* 直接隐藏 */
+}
+.my_container .left h4,
+.my_container .left h5 {
+  color: #fff;
+  padding: 10px 20px;
+}
+.my_container .left h4 {
+  margin: 8px;
+  text-align: center;
+  font-size: 32px;
+}
+.my_container .left ul {
+  margin-top: 10px;
+}
+.my_container .left ul h5 {
+  display: flex;
+  justify-content: space-between;
+  font-size: 24px;
+  font-weight: 500;
+}
+.my_container .left ul h5 svg {
+  width: 24px;
+  height: 24px;
+  color: #fff;
+}
+.my_container .left ul ul {
+  max-height: 500px;
+  /* 必须设置 overflow: hidden 否则内容会溢出 */
+  overflow: hidden;
+  opacity: 1;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  /* 使用贝塞尔曲线更自然 */
+  /* 折叠状态 */
+}
+.my_container .left ul ul a {
+  display: block;
+  width: 100%;
+}
+.my_container .left ul ul.collapsed {
+  max-height: 0;
+  opacity: 0;
+  margin: 0;
+  padding: 0;
+}
+.my_container .left ul li {
+  background-color: rgba(255, 255, 255, 0.1);
+  margin: 8px 12px;
+  border-radius: 8px;
+  color: #fff;
+  transition: all 0.2s;
+  padding: 4px;
+}
+.my_container .left ul li:hover {
+  background-color: rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+}
+.my_container .right {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  flex: 8;
+  padding: 20px;
+  position: relative;
+  /* 修改：去掉白色背景，让它透出底部的浅灰色，这样卡片的白色才能显现出来 */
+  background-color: transparent;
+  overflow-y: auto;
+  /* 针对 Webkit 内核浏览器 (Chrome, Edge, Safari) */
+}
+.my_container .right::-webkit-scrollbar {
+  display: none;
+  /* 直接隐藏 */
+}
+.my_container .right .user {
+  display: flex;
+  position: absolute;
+  right: 80px;
+  top: 20px;
+}
+.my_container .right .user img {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  object-fit: cover;
+  display: block;
+}
+.my_container .right .user img:hover {
+  cursor: pointer;
+}
+.my_container .right .user span {
+  padding-left: 8px;
+  align-items: center;
+  line-height: 40px;
+  font-size: 16px;
+  color: #2c3e50;
+}
+.my_container .right .upload {
+  width: 256px;
+  height: 256px;
+  background-color: #57bbae;
+  border-radius: 50%;
+  margin-top: 100px;
+  text-align: center;
+  line-height: 256px;
+  /* 关键点1：transition 写在原始状态，确保移入移出都有动画 */
+  transition: all 0.3s ease;
+  /* 关键点2：使用 & 符号连接伪类 */
+}
+.my_container .right .upload svg {
+  width: 100%;
+  height: 100%;
+  color: #ffffff;
+}
+.my_container .right .upload:hover {
+  background-color: #4aa396;
+  cursor: pointer;
+  /* 关键点3：使用 transform 缩放，性能更好且不影响布局 */
+  transform: scale(1.05);
+  /* 如果你非要改宽高，记得用 calc 修正 margin 否则会偏，但强烈推荐用 scale */
+}
+.my_container .right .btn-primary {
+  margin-top: 16px;
+}
+.my_container .right .tips {
+  margin-top: 8px;
+  color: #2c3e50;
+}
+.my_container .right .card {
+  display: none;
+  position: relative;
+  flex-direction: column;
+  align-items: center;
+  margin: 24px;
+  width: 800px;
+  height: 512px;
+  /* 修改：卡片使用纯白，配合底部的浅灰背景，会非常有层次感 */
+  background-color: #ffffff;
+  border-radius: 24px;
+  /* 1. 修复边框：必须指定样式 (solid/dashed/dotted) */
+  border: 2px solid #e1e4e8;
+  /* 2. 添加阴影：x偏移 y偏移 模糊半径 扩展半径 颜色 */
+  /* 这是一个很现代、柔和的阴影 */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+.my_container .right .card .output {
+  /* 修改方案：极淡的冷灰色背景，专业、中性，突出文字内容 */
+  background-color: #f9fafb;
+  /* 灰色边框，保持低调 */
+  border: 1px solid #e5e7eb;
+  min-height: 200px;
+  max-width: 700px;
+  width: 90%;
+  margin: 16px 0px 40px 0px;
+  padding: 24px;
+  border-radius: 8px;
+  /* 如果内容太长，显示滚动条 */
+  height: 400px;
+  /* 固定高度 */
+  overflow-y: auto;
+}
+.my_container .right .card .output p {
+  color: #2c3e50;
+  line-height: 1.6;
+  /* 增加行高，阅读更舒适 */
+}
+.my_container .right .card .save {
+  position: absolute;
+  right: 40px;
+  bottom: 4px;
+  width: 60px;
+  height: 32px;
+  font-size: 30px;
+  line-height: 24px;
+  text-align: center;
+  border-radius: 12px;
+  background-color: #57bbae;
+  color: #fff;
+  transition: all 0.3s;
+}
+.my_container .right .card .save:hover {
+  cursor: pointer;
+  background-color: #4aa396;
+}
+.my_container .right .card .save.disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+  pointer-events: none;
+  opacity: 0.6;
+}
+.my_container .modal_overlay {
+  display: none;
+  position: fixed;
+  z-index: 999;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.5);
+  align-items: center;
+  justify-content: center;
+}
+.my_container .modal_overlay .library_choose {
+  z-index: 1000;
+  width: 400px;
+  height: 600px;
+  background-color: #fff;
+  border-radius: 16px;
+  padding: 16px 0px;
+}
+.my_container .modal_overlay .library_choose p {
+  font-size: 20px;
+  text-align: center;
+  color: #2c3e50;
+}
+.my_container .modal_overlay .library_choose ul {
+  margin: 0px;
+  padding: 0px;
+}
+.my_container .modal_overlay .library_choose ul li {
+  padding: 12px 16px;
+  transition: all 0.2s;
+}
+.my_container .modal_overlay .library_choose ul li:nth-child(odd) {
+  background-color: #fff;
+}
+.my_container .modal_overlay .library_choose ul li:nth-child(even) {
+  background-color: #f9fafb;
+}
+.my_container .modal_overlay .library_choose ul li:hover {
+  cursor: pointer;
+  background-color: #f3f4f6;
+}

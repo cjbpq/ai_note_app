@@ -1,0 +1,109 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+a {
+  text-decoration: none;
+  color: #7f8c8d;
+}
+body {
+  background-color: #f5f7fa;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  margin: 0;
+  padding-top: 20px;
+}
+li {
+  list-style: none;
+}
+.wrapper {
+  margin: auto;
+  margin-top: 80px;
+  width: 400px;
+  height: 648px;
+  background-color: #e5e7eb;
+  padding: 40px;
+  border-radius: 8px;
+  background-color: transparent;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+}
+.wrapper .container {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+.wrapper .container h1 {
+  text-align: center;
+  font-size: 24px;
+}
+.wrapper .container .nav ul {
+  display: flex;
+  width: 100%;
+  justify-content: space-between;
+  height: 32px;
+  line-height: 32px;
+}
+.wrapper .container .nav ul .active {
+  background-color: #ffffff;
+}
+.wrapper .container .nav ul li {
+  border-radius: 4px;
+  flex: 1;
+  text-align: center;
+}
+.wrapper .container .nav ul li:hover {
+  cursor: pointer;
+}
+.wrapper .container .mode_register {
+  transform: translateX(-50%);
+}
+.wrapper .container .mid ul {
+  display: flex;
+  width: 200%;
+  height: 616px;
+}
+.wrapper .container .mid ul li {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  height: 100%;
+  background-color: #ffffff;
+  padding: 32px;
+}
+.wrapper .container .mid ul li p {
+  font-size: 16px;
+}
+.wrapper .container .mid ul li div {
+  margin-bottom: 32px;
+}
+.wrapper .container .mid ul li input {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid #e1e4e8;
+  border-radius: 6px;
+  outline: none;
+  transition: all 0.3s;
+}
+.wrapper .container .mid ul li input:focus {
+  border-color: #e1e4e8;
+  box-shadow: 0 0 0 3px rgba(87, 187, 174, 0.2);
+}
+.wrapper .container .mid ul li button {
+  width: 100%;
+  height: 40px;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+.wrapper .container .mid ul li button:disabled {
+  background-color: #a0d8d1;
+  cursor: not-allowed;
+}
+.wrapper .container .mid ul li .message {
+  color: #ff4d4f;
+  font-size: small;
+}

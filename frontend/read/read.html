@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI—Note阅读</title>
+    <link rel="stylesheet" href="./read.css" />
+  </head>
+  <body>
+    <!-- 深度阅读笔记界面 -->
+    <!-- 实现要求：左侧仍然有库目录栏 右侧是所要展示的深度笔记解析（模板）：一个原图＋智慧笔记展示  -->
+    <!-- 问题：1.深度阅读感觉有些单薄 为什么叫深度阅读 或者是说 我所需要的到底还有什么（只是一个原来的笔记的阿优化展示） -->
+    <!-- 2.需要一个跳转回去的地方  哦不完全可以将三个主要的界面设置在同一个大的框架内 即在library的左上角和右上角 均能回到main,login  main界面同理 -->
+    <!-- 设计：1.总体分为左右两部分 库目录栏和笔记界面相互独立 （仿照飞书文档的大体格式） -->
+    <!-- 2.右侧笔记界面 呈现我的原图 ai调试笔记 以及ai问答游戏等？其他部分 -->
+    <div class="container">
+      <div class="left">
+        <svg class="icon back" aria-hidden="true">
+          <use xlink:href="#icon-fanhuizhuye"></use>
+        </svg>
+        <h4>My Note Library</h4>
+        <ul>
+          <!-- 这里保留原始模板 -->
+          <!-- <li id="Chinese">
+            <h5>
+              语文
+              <svg
+                t="1763690579466"
+                class="icon"
+                viewBox="0 0 1024 1024"
+                version="1.1"
+                xmlns="http://www.w3.org/2000/svg"
+                p-id="10117"
+                width="200"
+                height="200"
+              >
+                <path
+                  d="M761.6 489.6l-432-435.2c-9.6-9.6-25.6-9.6-35.2 0-9.6 9.6-9.6 25.6 0 35.2l416 416-416 425.6c-9.6 9.6-9.6 25.6 0 35.2s25.6 9.6 35.2 0l432-441.6C771.2 515.2 771.2 499.2 761.6 489.6z"
+                  p-id="10118"
+                ></path>
+              </svg>
+            </h5>
+            <ul>
+              <li><a href="#">笔记1</a></li>
+              <li><a href="#">笔记2</a></li>
+              <li><a href="#">笔记3</a></li>
+            </ul>
+          </li> -->
+        </ul>
+      </div>
+      <div class="right">
+        <!-- 这个用户登录的user之后修改成一个用户中心 github类似的？   然后单拉出来一个index的宣传封面网页 内嵌一个login的设计  当然要再跳转也行 现在的user只是一个占位的作用 -->
+        <div class="user">
+          <img src="../uploads/f2ed2c69e1ccc614c0f1ce6f383cdd8c.jpg" alt="" />
+          <span>id123456</span>
+        </div>
+        <div class="origin_pic">
+          <img
+            src="../uploads/Snipaste_2025-11-18_21-55-28.png"
+            alt="笔记原图"
+          />
+        </div>
+        <div class="Title">
+          <svg class="icon" aria-hidden="true">
+            <use xlink:href="#icon-xingxing2"></use>
+          </svg>
+          <h2>智慧笔记</h2>
+        </div>
+        <div class="smart_note">
+          <span class="note_title">笔记标题</span>
+          <div class="note_content"><p>笔记内容</p></div>
+        </div>
+        <div class="others"></div>
+      </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="../lodash.min.js"></script>
+    <script src="../iconfont/iconfont.js"></script>
+    <script src="./read.js"></script>
+  </body>
+</html>

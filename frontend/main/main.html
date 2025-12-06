@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI—Note主页</title>
+    <link rel="stylesheet" href="../bootstrap.min.css" />
+    <link rel="stylesheet" href="./main.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown-light.min.css"
+    />
+    <!-- 网站的favicon图标 -->
+  </head>
+  <body>
+    <!-- 构思： -->
+    <!-- 3.由ai润色css  优化设计 -->
+
+    <!-- 问题：1.笔记的保存设置：怎么把笔记保存到相应的库目录内(数据存储问题) -->
+    <!-- 5.个人用户界面设计 -->
+    <!-- 6.其他精修部分 和  未考虑的功能 -->
+    <div class="my_container">
+      <!-- 左侧  库分类整理 -->
+      <div class="left">
+        <!-- 局部设计parts:1.左侧占据全部的一个长条 增强视觉主体效果 便于寻找 2.库的分类整理 可展开 可跳转  -->
+        <h4>My Note Library</h4>
+        <ul>
+          <!-- 这里保留原始模板 -->
+          <!-- <li id="Chinese">
+            <h5>
+              语文
+              <svg
+                t="1763690579466"
+                class="icon"
+                viewBox="0 0 1024 1024"
+                version="1.1"
+                xmlns="http://www.w3.org/2000/svg"
+                p-id="10117"
+                width="200"
+                height="200"
+              >
+                <path
+                  d="M761.6 489.6l-432-435.2c-9.6-9.6-25.6-9.6-35.2 0-9.6 9.6-9.6 25.6 0 35.2l416 416-416 425.6c-9.6 9.6-9.6 25.6 0 35.2s25.6 9.6 35.2 0l432-441.6C771.2 515.2 771.2 499.2 761.6 489.6z"
+                  p-id="10118"
+                ></path>
+              </svg>
+            </h5>
+            <ul>
+              <li><a href="#">笔记1</a></li>
+              <li><a href="#">笔记2</a></li>
+              <li><a href="#">笔记3</a></li>
+            </ul>
+          </li> -->
+        </ul>
+      </div>
+
+      <!-- 右侧 照片上传 笔记反馈等 -->
+      <div class="right">
+        <!-- 右上角用户中心 -->
+        <!-- 局部设计parts：右上角的用户头像id设置  -->
+        <!-- 小的div盒子 内部有头像和id -->
+        <div class="user">
+          <img src="../uploads/f2ed2c69e1ccc614c0f1ce6f383cdd8c.jpg" alt="" />
+          <span>id123456</span>
+        </div>
+
+        <!-- 中心的照相机式的上传按钮 -->
+        <div class="upload">
+          <svg
+            t="1763648094046"
+            class="icon"
+            viewBox="0 0 1024 1024"
+            version="1.1"
+            xmlns="http://www.w3.org/2000/svg"
+            p-id="7466"
+            width="200"
+            height="200"
+          >
+            <path
+              d="M512 102.4c227.2 0 409.6 182.4 409.6 409.6 0 227.2-182.4 409.6-409.6 409.6-227.2 0-409.6-182.4-409.6-409.6C102.4 284.8 284.8 102.4 512 102.4M512 0C230.4 0 0 230.4 0 512s230.4 512 512 512 512-230.4 512-512S793.6 0 512 0"
+              p-id="7467"
+            ></path>
+            <path
+              d="M512 332.8c99.2 0 179.2 80 179.2 179.2 0 99.2-80 179.2-179.2 179.2-99.2 0-179.2-80-179.2-179.2 0-99.2 80-179.2 179.2-179.2m0-102.4c-156.8 0-281.6 124.8-281.6 281.6s124.8 281.6 281.6 281.6 281.6-124.8 281.6-281.6-124.8-281.6-281.6-281.6"
+              p-id="7468"
+            ></path>
+            <path
+              d="M281.6 204.8c28.8 0 51.2 22.4 51.2 51.2 0 28.8-22.4 51.2-51.2 51.2-28.8 0-51.2-22.4-51.2-51.2 0-28.8 22.4-51.2 51.2-51.2"
+              p-id="7469"
+            ></path>
+          </svg>
+        </div>
+        <input
+          type="file"
+          id="file-upload"
+          name="avatar"
+          accept="image/*"
+          style="display: none"
+        />
+        <p class="tips"></p>
+        <button type="button" class="btn btn-primary btn-lg">
+          拍照上传图片
+        </button>
+        <!-- 下方的ai回答框   -->
+        <!-- 局部设计：1.卡片式容器（细节润色） 2.可能的一个过渡效果？ -->
+        <div class="card">
+          <h2>Smart Note</h2>
+          <div class="output markdown-body">
+            <h3>笔记标题</h3>
+            <p>笔记内容</p>
+          </div>
+          <div class="save">save</div>
+        </div>
+      </div>
+      <!-- 选择框蒙罩 -->
+      <!-- 这里需要一个默认隐藏的库目录选择栏 要求可能较多 先完成一个静态的库目录 后续再通过动态的数据处理来修改和渲染 -->
+      <!-- 似乎需要放到整个大的window内 然后始终居中 每次出现后周围的颜色变暗 -->
+      <!-- 设计：1.一个较为简略的Ul li 的静态库目录 -->
+      <!-- 2.标题提示：请选择你要存放的位置 -->
+      <!-- 3.动态效果：例如下拉子目录 -->
+      <div class="modal_overlay">
+        <div class="library_choose">
+          <p>请选择你要存放的位置:</p>
+          <ul>
+            <!-- <li>语文</li> -->
+          </ul>
+        </div>
+      </div>
+    </div>
+    <script src="../lodash.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="./main.js"></script>
+  </body>
+</html>

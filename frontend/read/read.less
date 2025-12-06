@@ -1,0 +1,219 @@
+// 问题：1.字体的样式还需要调整 比如content中文字太过难看 不透气（感觉还是不如markdown好看）
+//2.UI设计后续调整
+//
+//
+//
+//
+//
+//
+//
+//
+
+// === 🎨 颜色变量定义 (Color Palette) ===
+
+// 1. 品牌主色 (你的那个青色，去掉了透明度，更实)
+@brand-color: #57bbae;
+@brand-hover: #4aa396; // 鼠标悬停时深一点
+
+// 2. 文字颜色 (不要用纯黑)
+@text-main: #2c3e50; // 主要文字，深蓝灰，比纯黑更有质感
+@text-secondary: #7f8c8d; // 次要文字，灰色
+
+// 3. 背景颜色
+@bg-page: #f5f7fa; // 页面大背景，极淡的灰蓝色，很护眼
+@bg-card: #ffffff; // 内容卡片背景，纯白
+
+// 4. 边框颜色
+@border-color: #e1e4e8;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+a {
+  text-decoration: none;
+  color: @text-secondary;
+}
+body {
+  background-color: @bg-page;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+li {
+  list-style: none;
+}
+//通用字体图标css设置
+.icon {
+  width: 32px;
+  height: 32px;
+  vertical-align: -0.15em;
+  fill: currentColor;
+  overflow: hidden;
+}
+.container {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden; //配合设置滚动条
+}
+.left {
+  position: relative;
+  // width: 100px;
+  height: 100%;
+  background-color: @brand-color;
+  flex: 2;
+  //隐藏侧边滚动条的设置
+  overflow-y: auto; //左侧自主隐藏和滚动  但前提需要固定高度 否则高度都没有怎么隐藏？ 可能导致直接被body给隐藏了
+  /* 针对 Webkit 内核浏览器 (Chrome, Edge, Safari) */ //滚动条隐藏
+  &::-webkit-scrollbar {
+    display: none; /* 直接隐藏 */
+  }
+  .back {
+    position: absolute;
+    left: 4px;
+    top: 24px;
+    &:hover {
+      cursor: pointer;
+    }
+  }
+  h4,
+  h5 {
+    color: #fff; // 深色背景上一定要用纯白文字
+    padding: 10px 20px;
+  }
+  h4 {
+    margin: 8px;
+    text-align: center;
+    font-size: 32px;
+  }
+  ul {
+    margin-top: 10px;
+    padding-left: 2rem;
+    h5 {
+      display: flex;
+      justify-content: space-between;
+      font-size: 24px;
+      font-weight: 500;
+      svg {
+        width: 24px;
+        height: 24px;
+        color: #fff;
+      }
+    }
+    ul {
+      // transition: all 0.5s;  没有生效，因为浏览器认为从none到block没有中间过程
+      max-height: 500px;
+      /* 必须设置 overflow: hidden 否则内容会溢出 */
+      overflow: hidden;
+      opacity: 1;
+      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); /* 使用贝塞尔曲线更自然 */
+
+      a {
+        display: block;
+        width: 100%;
+      }
+
+      /* 折叠状态 */
+      &.collapsed {
+        max-height: 0;
+        opacity: 0;
+        margin: 0;
+        padding: 0;
+      }
+    }
+    li {
+      // 子库/菜单项的样式
+      background-color: rgba(255, 255, 255, 0.1); // 方案：10%透明白
+      margin: 8px 12px; // 留点间距，不要挤在一起
+      border-radius: 8px; // 圆角，保持风格统一
+      color: #fff;
+      transition: all 0.2s;
+      padding: 4px;
+      &:hover {
+        background-color: rgba(255, 255, 255, 0.25);
+        cursor: pointer;
+      }
+    }
+  }
+}
+.right {
+  height: 100%;
+  background-color: @bg-page;
+  flex: 8;
+  overflow-y: auto; //左侧自主隐藏和滚动  但前提需要固定高度 否则高度都没有怎么隐藏？ 可能导致直接被body给隐藏了
+  /* 针对 Webkit 内核浏览器 (Chrome, Edge, Safari) */ //滚动条隐藏
+  &::-webkit-scrollbar {
+    display: none; /* 直接隐藏 */
+  }
+  .origin_pic {
+    margin: 64px auto;
+
+    //容器固定宽高
+    width: 400px;
+    height: 400px;
+    //照片定位设置
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    img {
+      //限制一下边界
+      max-width: 100%;
+      max-height: 100%;
+      //contain表示保持比例完整显示，即按原比例但会有留白  而cover表示按照边界要求 直接裁剪
+      object-fit: contain;
+      // 稍微加点圆角更精致
+      border-radius: 4px;
+    }
+  }
+  .Title {
+    display: flex;
+    justify-content: center;
+    margin-top: 24px;
+    font-size: large;
+  }
+  .smart_note {
+    margin: 24px 48px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    background-color: @bg-card;
+    border: 2px solid @border-color;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    border-radius: 16px;
+    .note_title {
+      // font-size: 24px;
+      color: @text-main;
+    }
+    .note_content {
+      margin-top: 8px;
+      color: @text-main;
+    }
+  }
+}
+.user {
+  display: flex;
+  position: absolute;
+  right: 80px;
+  top: 20px;
+  img {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    overflow: hidden;
+    object-fit: cover;
+    display: block;
+    &:hover {
+      cursor: pointer;
+    }
+  }
+  span {
+    padding-left: 8px;
+    align-items: center;
+    line-height: 40px;
+    font-size: 16px;
+    color: @text-main;
+  }
+}
