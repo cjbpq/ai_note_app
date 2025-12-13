@@ -4,22 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI—Note阅读</title>
+
+    <link rel="stylesheet" href="../common/common.css" />
     <link rel="stylesheet" href="./read.css" />
   </head>
   <body>
     <!-- 深度阅读笔记界面 -->
-    <!-- 实现要求：左侧仍然有库目录栏 右侧是所要展示的深度笔记解析（模板）：一个原图＋智慧笔记展示  -->
-    <!-- 问题：1.深度阅读感觉有些单薄 为什么叫深度阅读 或者是说 我所需要的到底还有什么（只是一个原来的笔记的阿优化展示） -->
-    <!-- 2.需要一个跳转回去的地方  哦不完全可以将三个主要的界面设置在同一个大的框架内 即在library的左上角和右上角 均能回到main,login  main界面同理 -->
-    <!-- 设计：1.总体分为左右两部分 库目录栏和笔记界面相互独立 （仿照飞书文档的大体格式） -->
     <!-- 2.右侧笔记界面 呈现我的原图 ai调试笔记 以及ai问答游戏等？其他部分 -->
     <div class="container">
+      <!-- ========== 新增：抽屉遮罩层（移动端） ========== -->
+      <div class="drawer-overlay"></div>
+
+      <!-- 左侧目录栏 -->
       <div class="left">
         <svg class="icon back" aria-hidden="true">
           <use xlink:href="#icon-fanhuizhuye"></use>
         </svg>
-        <h4>My Note Library</h4>
-        <ul>
+        <h4>Note Library</h4>
+        <ul class="library">
           <!-- 这里保留原始模板 -->
           <!-- <li id="Chinese">
             <h5>
@@ -48,12 +50,15 @@
           </li> -->
         </ul>
       </div>
+      <!-- 笔记展示区：原图展示＋ai智慧笔记+(AI特色笔记功能？交互？) -->
       <div class="right">
-        <!-- 这个用户登录的user之后修改成一个用户中心 github类似的？   然后单拉出来一个index的宣传封面网页 内嵌一个login的设计  当然要再跳转也行 现在的user只是一个占位的作用 -->
-        <div class="user">
-          <img src="../uploads/f2ed2c69e1ccc614c0f1ce6f383cdd8c.jpg" alt="" />
-          <span>id123456</span>
-        </div>
+        <!-- ========== 新增：汉堡菜单按钮（移动端显示） ========== -->
+        <button class="hamburger-btn" aria-label="打开目录">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+
         <div class="origin_pic">
           <img
             src="../uploads/Snipaste_2025-11-18_21-55-28.png"
@@ -73,9 +78,37 @@
         <div class="others"></div>
       </div>
     </div>
+
+    <!-- 底部导航栏 -->
+    <nav class="bottom-nav">
+      <a href="../index/index.html" class="nav-item">
+        <svg class="icon"><use xlink:href="#icon-fanhuizhuye"></use></svg>
+        <span>首页</span>
+      </a>
+      <a href="../main/main.html" class="nav-item">
+        <svg class="icon"><use xlink:href="#icon-paizhaoshangchuan"></use></svg>
+        <span>上传</span>
+      </a>
+      <a href="../read/read.html" class="nav-item active">
+        <svg class="icon"><use xlink:href="#icon-yuedu"></use></svg>
+        <span>笔记</span>
+      </a>
+      <a href="../user/user.html" class="nav-item">
+        <svg class="icon"><use xlink:href="#icon-wode"></use></svg>
+        <span>我的</span>
+      </a>
+    </nav>
+    <!-- 1. 第三方库（被所有代码依赖） -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="../lodash.min.js"></script>
     <script src="../iconfont/iconfont.js"></script>
+    <!-- 2.公共库 -->
+    <script src="../common/config.js"></script>
+    <script src="../common/utils.js"></script>
+    <script src="../common/storage.js"></script>
+    <script src="../common/api.js"></script>
+    <script src="../common/render.js"></script>
+    <!-- 3.自带js -->
     <script src="./read.js"></script>
   </body>
 </html>

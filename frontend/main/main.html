@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI—Note主页</title>
     <link rel="stylesheet" href="../bootstrap.min.css" />
+    <link rel="stylesheet" href="../common/common.css" />
     <link rel="stylesheet" href="./main.css" />
     <link
       rel="stylesheet"
@@ -13,18 +14,13 @@
     <!-- 网站的favicon图标 -->
   </head>
   <body>
-    <!-- 构思： -->
-    <!-- 3.由ai润色css  优化设计 -->
-
-    <!-- 问题：1.笔记的保存设置：怎么把笔记保存到相应的库目录内(数据存储问题) -->
-    <!-- 5.个人用户界面设计 -->
-    <!-- 6.其他精修部分 和  未考虑的功能 -->
     <div class="my_container">
+      <!-- ========== 新增：抽屉遮罩层（移动端） ========== -->
+      <div class="drawer-overlay"></div>
       <!-- 左侧  库分类整理 -->
       <div class="left">
-        <!-- 局部设计parts:1.左侧占据全部的一个长条 增强视觉主体效果 便于寻找 2.库的分类整理 可展开 可跳转  -->
         <h4>My Note Library</h4>
-        <ul>
+        <ul class="library">
           <!-- 这里保留原始模板 -->
           <!-- <li id="Chinese">
             <h5>
@@ -56,9 +52,13 @@
 
       <!-- 右侧 照片上传 笔记反馈等 -->
       <div class="right">
+        <!-- ========== 新增：汉堡菜单按钮（移动端显示） ========== -->
+        <button class="hamburger-btn" aria-label="打开目录">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
         <!-- 右上角用户中心 -->
-        <!-- 局部设计parts：右上角的用户头像id设置  -->
-        <!-- 小的div盒子 内部有头像和id -->
         <div class="user">
           <img src="../uploads/f2ed2c69e1ccc614c0f1ce6f383cdd8c.jpg" alt="" />
           <span>id123456</span>
@@ -102,7 +102,6 @@
           拍照上传图片
         </button>
         <!-- 下方的ai回答框   -->
-        <!-- 局部设计：1.卡片式容器（细节润色） 2.可能的一个过渡效果？ -->
         <div class="card">
           <h2>Smart Note</h2>
           <div class="output markdown-body">
@@ -113,11 +112,6 @@
         </div>
       </div>
       <!-- 选择框蒙罩 -->
-      <!-- 这里需要一个默认隐藏的库目录选择栏 要求可能较多 先完成一个静态的库目录 后续再通过动态的数据处理来修改和渲染 -->
-      <!-- 似乎需要放到整个大的window内 然后始终居中 每次出现后周围的颜色变暗 -->
-      <!-- 设计：1.一个较为简略的Ul li 的静态库目录 -->
-      <!-- 2.标题提示：请选择你要存放的位置 -->
-      <!-- 3.动态效果：例如下拉子目录 -->
       <div class="modal_overlay">
         <div class="library_choose">
           <p>请选择你要存放的位置:</p>
@@ -127,8 +121,39 @@
         </div>
       </div>
     </div>
+
+    <!-- 底部导航栏 -->
+    <nav class="bottom-nav">
+      <a href="../index/index.html" class="nav-item">
+        <svg class="icon"><use xlink:href="#icon-fanhuizhuye"></use></svg>
+        <span>首页</span>
+      </a>
+      <a href="../main/main.html" class="nav-item active">
+        <svg class="icon"><use xlink:href="#icon-paizhaoshangchuan"></use></svg>
+        <span>上传</span>
+      </a>
+      <a href="../read/read.html" class="nav-item">
+        <svg class="icon"><use xlink:href="#icon-yuedu"></use></svg>
+        <span>笔记</span>
+      </a>
+      <a href="../user/user.html" class="nav-item">
+        <svg class="icon"><use xlink:href="#icon-wode"></use></svg>
+        <span>我的</span>
+      </a>
+    </nav>
+    <!-- ========== JavaScript 引入顺序很重要 ========== -->
+    <!-- 1. 第三方库（被所有代码依赖） -->
     <script src="../lodash.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="../iconfont/iconfont.js"></script>
+    <!-- 2. 公共模块（按依赖顺序：config 最先，因为其他模块可能依赖它） -->
+    <script src="../common/config.js"></script>
+    <script src="../common/utils.js"></script>
+    <script src="../common/storage.js"></script>
+    <script src="../common/api.js"></script>
+    <script src="../common/render.js"></script>
+
+    <!-- 3. 页面自己的逻辑（最后加载，可以使用上面所有的全局变量和函数） -->
     <script src="./main.js"></script>
   </body>
 </html>

@@ -10,25 +10,6 @@
 //4.文字颜色
 @text-secondary: #7f8c8d;
 @error-color: #ff4d4f;
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-a {
-  text-decoration: none;
-  color: @text-secondary;
-}
-body {
-  background-color: @bg-page;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
-  margin: 0;
-  padding-top: 20px;
-}
-li {
-  list-style: none;
-}
 
 .wrapper {
   margin: auto;
@@ -130,6 +111,58 @@ li {
           color: @error-color;
           font-size: small;
         }
+      }
+    }
+  }
+}
+
+// ============================================
+// 📱 替换 Tailwind 的按钮样式
+// ============================================
+
+.login_btn,
+.register_btn {
+  background-color: #38bdf8; // sky-400
+  border-radius: 6px; // rounded-md
+
+  &:hover {
+    background-color: #0ea5e9; // sky-500
+  }
+}
+
+// ============================================
+// 📱 移动端响应式适配
+// ============================================
+
+@mobile: 768px;
+
+@media (max-width: @mobile) {
+  .wrapper {
+    width: 90%; // 改为百分比，不再固定 400px
+    max-width: 400px; // 但最大不超过 400px
+    margin-top: 40px; // 减少顶部间距
+    padding: 24px; // 减少内边距
+    height: auto; // 高度自适应
+    min-height: 500px;
+  }
+
+  .container {
+    h1 {
+      font-size: 20px; // 标题稍微缩小
+    }
+
+    .mid ul li {
+      width: 100%; // 撑满父容器
+      padding: 20px; // 减少内边距
+
+      input {
+        height: 44px; // 增大触摸区域
+        font-size: 16px; // 防止 iOS 自动缩放
+      }
+
+      button {
+        height: 44px; // 增大触摸区域
+        font-size: 16px;
       }
     }
   }

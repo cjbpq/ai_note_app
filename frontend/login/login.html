@@ -4,14 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI-Note用户登录</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+
+    <link rel="stylesheet" href="../common/common.css" />
     <link rel="stylesheet" href="./login.css" />
   </head>
   <body>
     <!-- 3.设置一个ai note的小图标  AI生成 -->
 
     <!-- Part 1 总体设计-->
-
     <div class="wrapper">
       <div class="container">
         <h1>AI-Note</h1>
@@ -33,7 +33,6 @@
                     placeholder="请输入您的用户名"
                     name="username"
                     id="uname_log"
-                    class="outline-none"
                   />
                   <p class="message"></p>
                 </div>
@@ -44,15 +43,10 @@
                     placeholder="请输入您的密码"
                     name="password"
                     id="password_log"
-                    class="outline-none"
                   />
                   <p class="message"></p>
                 </div>
-                <button
-                  class="login_btn bg-sky-400 rounded-md hover:bg-sky-500"
-                >
-                  登录
-                </button>
+                <button class="login_btn">登录</button>
               </div>
             </li>
             <!-- 注册的li -->
@@ -65,7 +59,6 @@
                     placeholder="请输入您的用户名"
                     name="username"
                     id="uname"
-                    class="outline-none"
                   />
                   <p class="message"></p>
                 </div>
@@ -76,7 +69,6 @@
                     placeholder="请输入您的邮箱地址"
                     name="email"
                     id="email"
-                    class="outline-none"
                   />
                   <p class="message"></p>
                 </div>
@@ -87,21 +79,23 @@
                     placeholder="请输入您的密码"
                     name="password"
                     id="password"
-                    class="outline-none"
                   />
                   <p class="message"></p>
                 </div>
-                <button
-                  class="register_btn bg-sky-400 rounded-md hover:bg-sky-500"
-                >
-                  注册
-                </button>
+                <button class="register_btn">注册</button>
               </div>
             </li>
           </ul>
         </div>
       </div>
     </div>
+
+    <script src="../common/config.js"></script>
+    <script src="../common/utils.js"></script>
+    <script src="../common/storage.js"></script>
+    <script src="../common/api.js"></script>
+    <script src="../common/render.js"></script>
+
     <script src="./login.js"></script>
   </body>
 </html>

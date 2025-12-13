@@ -10,70 +10,17 @@ libaries.addEventListener("click", (e) => {
   }
 });
 
-//二.页面关联性设计？
-//右上角用户登录
-const user_login = document.querySelector(".user img");
-user_login.addEventListener("click", () => {
-  window.location.href = "../login/login.html";
-});
-//左上角返回主页
-const back_mian = document.querySelector(".back");
-back_mian.addEventListener("click", () => {
-  window.location.href = "../main/main.html";
-});
-
-//三.render渲染逻辑：从本地的数据中再次渲染
+//二.render渲染逻辑：从本地的数据中再次渲染
 //1.左侧的库目录渲染
 let my_data = JSON.parse(localStorage.getItem("data"));
-function renderLibrary() {
-  //1。左侧渲染
-  const newdata = my_data.map(function (ele, index) {
-    const fa = _.cloneDeep(ele); //父级对象
-    const pid = index; //父级id
-    //子目数组 下面进行修改
-    const sons = fa.sons.map(function (ele, index) {
-      const sid = index; //子级id
-      return ` 
-<li><a href="#" data-pid=${pid} data-sid=${sid}>${ele.title}</a></li>
-`;
-    }); //sons数组中存放的就是html化后的文本
-
-    return `  
-          <li id=${fa.class}>
-            <h5>
-              ${fa.class}
-              <svg
-                t="1763690579466"
-                class="icon"
-                viewBox="0 0 1024 1024"
-                version="1.1"
-                xmlns="http://www.w3.org/2000/svg"
-                p-id="10117"
-                width="200"
-                height="200"
-              >
-                <path
-                  d="M761.6 489.6l-432-435.2c-9.6-9.6-25.6-9.6-35.2 0-9.6 9.6-9.6 25.6 0 35.2l416 416-416 425.6c-9.6 9.6-9.6 25.6 0 35.2s25.6 9.6 35.2 0l432-441.6C771.2 515.2 771.2 499.2 761.6 489.6z"
-                  p-id="10118"
-                ></path>
-              </svg>
-            </h5>
-            <ul>
-              ${sons.join("")}
-            </ul>
-          </li>`;
-  });
-  //至此newdata中的数据已经完全html化 原来的对象数据变成了现在的html文本
-  document.querySelector(".left ul").innerHTML = newdata.join(""); //赋值
-}
-renderLibrary(); //页面刷新执行script时就会渲染  当然有操作的时候也需要渲染
+renderLibrary(my_data); //页面刷新执行script时就会渲染  当然有操作的时候也需要渲染
 
 //2.右侧渲染
 //2.0渲染函数设置
+//注意到这个过程中一定需要直到自己目前选中（点击）的是哪一个子目 用他们来替换上面的一大串  因而需要在为子目绑定的事件里回调这个函数
 function renderContent(title, content, pic) {
   document.querySelector(".note_title").innerHTML = title || "笔记标题";
   document.querySelector(".note_content p").innerHTML = content || "笔记内容";
-  // document.querySelector(".origin_pic img").src = pic; //如果没有加载出来可能会显示是一个未加载的图片
   //异常处理 如果没有图片设置就直接不显示
   const img = document.querySelector(".origin_pic img");
   if (pic) {
@@ -82,7 +29,6 @@ function renderContent(title, content, pic) {
   } else {
     img.style.display = "none";
   }
-  //注意到这个过程中一定需要直到自己目前选中（点击）的是哪一个子目 用他们来替换上面的一大串  因而需要在为子目绑定的事件里回调这个函数
 }
 //2.1解析与预渲染模块
 document.addEventListener("DOMContentLoaded", () => {
@@ -121,4 +67,53 @@ document.querySelector(".left ul").addEventListener("click", (e) => {
   const pic = note.pic;
   //调用renderContent函数丢进去  这样子就可以实现 点击子目——获取相关数据——渲染到页面中 的完整工作流了
   renderContent(title, content, pic);
+});
+
+// ============================================
+// 三. 移动端抽屉式目录栏控制
+// ============================================
+
+const hamburgerBtn = document.querySelector(".hamburger-btn");
+const leftDrawer = document.querySelector(".left");
+const drawerOverlay = document.querySelector(".drawer-overlay");
+
+// 打开抽屉
+function openDrawer() {
+  hamburgerBtn.classList.add("active");
+  leftDrawer.classList.add("open");
+  drawerOverlay.classList.add("show");
+}
+
+// 关闭抽屉
+function closeDrawer() {
+  hamburgerBtn.classList.remove("active");
+  leftDrawer.classList.remove("open");
+  drawerOverlay.classList.remove("show");
+}
+
+// 切换抽屉状态
+function toggleDrawer() {
+  if (leftDrawer.classList.contains("open")) {
+    closeDrawer();
+  } else {
+    openDrawer();
+  }
+}
+
+// 汉堡按钮点击
+hamburgerBtn.addEventListener("click", toggleDrawer);
+
+// 遮罩层点击关闭
+drawerOverlay.addEventListener("click", closeDrawer);
+
+// 点击笔记链接后关闭抽屉
+leftDrawer.addEventListener("click", (e) => {
+  if (e.target.tagName === "A") {
+    closeDrawer();
+  }
+});
+
+// 返回按钮事件（已有功能，确保移动端也能正常工作）
+document.querySelector(".back").addEventListener("click", () => {
+  window.location.href = "../main/main.html";
 });
