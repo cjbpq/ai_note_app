@@ -28,7 +28,18 @@
       "Bash(pip install:*)",
       "Bash(done)",
       "SlashCommand(/workflow:session:complete)",
-      "Bash(./venv/Scripts/python:*)"
+      "Bash(./venv/Scripts/python:*)",
+      "Bash(xargs:*)",
+      "Bash(cmd.exe /c \"cd /d D:\\ai_note_app\\frontend && flutter gen-l10n && flutter build apk --release\")",
+      "Bash(powershell.exe -Command \"cd D:/ai_note_app/frontend; flutter gen-l10n; flutter build apk --release\")",
+      "Bash(powershell.exe -Command \"[Environment]::SetEnvironmentVariable(''Path'', [Environment]::GetEnvironmentVariable(''Path'', ''User'') + '';D:\\flutter\\flutter\\bin'', ''User'')\")",
+      "Bash(echo:*)",
+      "Bash(~/.claude/scripts/get_modules_by_depth.sh:*)",
+      "Bash(flutter pub get:*)",
+      "Bash(D:/flutter/flutter/bin/flutter.bat analyze:*)",
+      "Bash(/d/flutter/flutter/bin/flutter gen-l10n:*)",
+      "Bash(/d/flutter/flutter/bin/flutter analyze:*)",
+      "Bash(/d/flutter/flutter/bin/flutter build:*)"
     ],
     "deny": [],
     "ask": []

@@ -114,15 +114,15 @@ async def process_note_job(
         _update_status(db, job, "PERSISTED")
         logger.info("Successfully processed upload job %s", job_id)
 
-        # Cleanup: Delete the uploaded image file
-        if storage_path:
-            try:
-                file_path = Path(storage_path)
-                if file_path.exists():
-                    file_path.unlink()
-                    logger.info("Deleted temporary image file: %s", storage_path)
-            except Exception as e:
-                logger.warning("Failed to delete image file %s: %s", storage_path, e)
+        # 保留图片文件供前端显示，不再删除
+        # if storage_path:
+        #     try:
+        #         file_path = Path(storage_path)
+        #         if file_path.exists():
+        #             file_path.unlink()
+        #             logger.info("Deleted temporary image file: %s", storage_path)
+        #     except Exception as e:
+        #         logger.warning("Failed to delete image file %s: %s", storage_path, e)
 
     except Exception as exc:  # noqa: BLE001
         logger.exception("Unexpected failure while processing job %s", job_id)
