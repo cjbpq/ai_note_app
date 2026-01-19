@@ -20,6 +20,8 @@ class NoteUpdate(BaseModel):
     category: Optional[str] = None
     tags: Optional[List[str]] = None
     is_favorite: Optional[bool] = None
+    original_text: Optional[str] = None
+    structured_data: Optional[Dict[str, Any]] = None
 
 class NoteResponse(NoteBase):
     id: uuid.UUID

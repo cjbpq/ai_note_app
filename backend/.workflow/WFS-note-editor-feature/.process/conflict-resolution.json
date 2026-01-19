@@ -1,0 +1,74 @@
+{
+  "session_id": "WFS-note-editor-feature",
+  "resolved_at": "2025-12-15T09:10:00Z",
+  "original_risk_level": "medium",
+  "final_risk_level": "resolved",
+  "revision": 2,
+  "revision_reason": "用户要求改为详情页内编辑模式，支持混合编辑体验（WYSIWYG + Markdown源码）",
+  "resolved_conflicts": [
+    {
+      "id": "CON-001",
+      "brief": "笔记详情页编辑模式选择",
+      "category": "Architecture",
+      "severity": "High",
+      "selected_strategy": "详情页内编辑/预览模式切换（类似 Obsidian）",
+      "rationale": "用户要求在详情页直接编辑，所见即所得体验，通过按钮切换编辑/预览模式",
+      "implementation_notes": [
+        "改造 note_detail_page.dart 支持编辑/预览模式切换",
+        "顶部 AppBar 添加模式切换按钮",
+        "预览模式使用现有 LatexMarkdown 渲染",
+        "编辑模式支持 WYSIWYG 和 Markdown 源码两种子模式"
+      ]
+    },
+    {
+      "id": "CON-002",
+      "brief": "编辑器体验选择",
+      "category": "Integration",
+      "severity": "High",
+      "selected_strategy": "混合模式（WYSIWYG + Markdown 源码可切换）",
+      "rationale": "用户要求两种编辑体验都支持，可自由切换",
+      "implementation_notes": [
+        "flutter_quill 用于 WYSIWYG 富文本编辑",
+        "TextField/TextFormField 用于 Markdown 源码编辑",
+        "实时预览使用 LatexMarkdown 组件",
+        "三种模式：预览 / WYSIWYG编辑 / Markdown源码编辑"
+      ]
+    },
+    {
+      "id": "CON-003",
+      "brief": "编辑内容数据存储方案",
+      "category": "Data",
+      "severity": "Medium",
+      "selected_strategy": "编辑 original_text (Markdown)",
+      "rationale": "统一使用 Markdown 格式存储，WYSIWYG 编辑器内容需转换为 Markdown",
+      "implementation_notes": [
+        "Markdown 源码编辑直接操作 original_text",
+        "WYSIWYG 编辑器内容需要 Delta -> Markdown 转换",
+        "保存时统一存入 original_text 字段",
+        "后端 NoteUpdate schema 已支持"
+      ]
+    }
+  ],
+  "implementation_decisions": {
+    "editor_library": "flutter_quill (WYSIWYG) + TextField (Markdown源码)",
+    "editing_location": "详情页内（note_detail_page.dart）",
+    "editing_modes": ["预览模式", "WYSIWYG编辑模式", "Markdown源码编辑模式"],
+    "mode_switch": "AppBar 按钮切换",
+    "data_storage": "original_text (Markdown)",
+    "preview_renderer": "LatexMarkdown (现有组件)",
+    "architecture_impact": "medium - 详情页需要大幅改造"
+  },
+  "affected_files": [
+    "pubspec.yaml (添加 flutter_quill 依赖)",
+    "lib/presentation/pages/notes/note_detail_page.dart (大幅改造，核心文件)",
+    "lib/presentation/widgets/note_content_editor.dart (新建，封装编辑器)",
+    "lib/presentation/widgets/markdown_source_editor.dart (新建，Markdown源码编辑)",
+    "lib/providers/notes_provider.dart (添加编辑状态管理)",
+    "lib/utils/delta_markdown_converter.dart (新建，Delta<->Markdown转换)"
+  ],
+  "complexity_analysis": {
+    "original_complexity": "medium",
+    "revised_complexity": "high",
+    "reason": "混合编辑模式需要处理多种编辑器状态、格式转换、模式切换逻辑"
+  }
+}
