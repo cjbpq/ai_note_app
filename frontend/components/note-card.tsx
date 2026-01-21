@@ -61,9 +61,11 @@ export default function NoteCard({
               {tags.map((t) => (
                 <Chip
                   key={t}
-                  style={styles.tag}
+                  style={[
+                    styles.tag,
+                    { backgroundColor: theme.colors.secondaryContainer },
+                  ]}
                   textStyle={{ color: theme.colors.onSecondaryContainer }}
-                  style={{ backgroundColor: theme.colors.secondaryContainer }}
                   compact
                 >
                   {t}

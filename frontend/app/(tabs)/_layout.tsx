@@ -14,23 +14,23 @@ export default function TabLayout() {
         headerShown: true, // 显示当前页面的标题栏
       }}
     >
-      {/* 首页 Tab */}
+      {/* 首页 Tab (添加笔记/拍照) */}
       <Tabs.Screen
         name="index"
         options={{
           title: t("tab.home"),
           tabBarIcon: ({ color }) => (
-            <Ionicons name="home" size={24} color={color} />
+            <Ionicons name="camera-outline" size={28} color={color} />
           ),
         }}
       />
-      {/* 阅读 Tab */}
+      {/* 阅读 Tab (笔记列表) */}
       <Tabs.Screen
         name="read"
         options={{
           title: t("tab.read"),
           tabBarIcon: ({ color }) => (
-            <Ionicons name="book" size={24} color={color} />
+            <Ionicons name="documents-outline" size={24} color={color} />
           ),
         }}
       />

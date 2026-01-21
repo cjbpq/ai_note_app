@@ -1,16 +1,22 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import axios, {
   AxiosError,
   AxiosResponse,
   InternalAxiosRequestConfig,
 } from "axios";
+import { APP_CONFIG, STORAGE_KEYS } from "../constants/config";
 
-// 这里应该换成你的真实后端地址
-// 提示：如果是安卓模拟器，localhost 通常需要换成 10.0.2.2，或者使用局域网 IP
-const BASE_URL = "http://localhost:3000/api";
+// ============================================================================
+// 调试日志：验证环境变量是否正确加载
+// 如果看到的 baseURL 不是你 .env 中配置的地址，说明环境变量没加载成功
+// ============================================================================
+console.log("[API Service] 环境变量检查:");
+console.log("  EXPO_PUBLIC_API_URL =", process.env.EXPO_PUBLIC_API_URL);
+console.log("  APP_CONFIG.API_BASE_URL =", APP_CONFIG.API_BASE_URL);
 
 const api = axios.create({
-  baseURL: BASE_URL,
-  timeout: 10000, // 10秒超时
+  baseURL: APP_CONFIG.API_BASE_URL,
+  timeout: APP_CONFIG.REQUEST_TIMEOUT,
   headers: {
     "Content-Type": "application/json",
   },
@@ -18,9 +24,23 @@ const api = axios.create({
 
 // 请求拦截器：可以在这里统一添加 Token
 api.interceptors.request.use(
-  (config: InternalAxiosRequestConfig) => {
-    // 示例：const token = await AsyncStorage.getItem('token');
-    // if (token) config.headers.Authorization = `Bearer ${token}`;
+  async (config: InternalAxiosRequestConfig) => {
+    // 调试日志：打印每个请求的完整 URL
+    console.log(
+      "[API Request]",
+      config.method?.toUpperCase(),
+      config.baseURL,
+      config.url,
+    );
+
+    try {
+      const token = await AsyncStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+    } catch (error) {
+      console.error("Error fetching token from storage:", error);
+    }
     return config;
   },
   (error: AxiosError) => {
@@ -36,6 +56,14 @@ api.interceptors.response.use(
   (error: AxiosError) => {
     // 可以在这里打印日志或触发全局提示
     console.error("API Error:", error.response?.status, error.message);
+
+    // 401 处理：仅记录或提示，不强制跳转，交由 UI 层处理
+    if (error.response?.status === 401) {
+      // 可以在这里派发一个全局事件或者只是 console.warn
+      // 到后面可以使用 event emitter 或者 zustand store 来通知 UI 显示 Toast
+      console.warn("Token expired or unauthorized.");
+    }
+
     return Promise.reject(error);
   },
 );
