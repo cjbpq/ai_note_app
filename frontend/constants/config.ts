@@ -6,6 +6,7 @@
 export const ROUTES = {
   HOME: "(tabs)/index", // 示例：虽然 Expo Router 是基于文件的，但在做跳转时定义常量可以防手误
   LOGIN: "login",
+  NOTE_DETAIL: "/note", // 笔记详情页基础路径，使用时拼接 ID: `/note/${id}`
 };
 
 export const APP_CONFIG = {
@@ -14,6 +15,23 @@ export const APP_CONFIG = {
   API_BASE_URL: (
     process.env.EXPO_PUBLIC_API_URL || "http://localhost:3000/api/v1"
   ).trim(),
+
+  // 静态资源基础 URL
+  // 用于拼接后端返回的相对图片路径（如 /static/xxx.jpg → http://host/static/xxx.jpg）
+  // 注意：静态文件路径不需要 /api/v1 前缀
+  STATIC_BASE_URL: (() => {
+    const apiUrl = (
+      process.env.EXPO_PUBLIC_API_URL || "http://localhost:3000/api/v1"
+    ).trim();
+    // 从 API URL 中提取服务器根地址（移除 /api/v1 等路径后缀）
+    try {
+      const url = new URL(apiUrl);
+      return `${url.protocol}//${url.host}`;
+    } catch {
+      // 如果 URL 解析失败，简单删除 /api 路径
+      return apiUrl.replace(/\/api.*$/, "");
+    }
+  })(),
 
   // 数据库相关
   DB_NAME: "campus_notes.db",

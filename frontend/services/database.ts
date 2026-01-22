@@ -11,6 +11,9 @@ import { Note } from "../types";
 
 let db: SQLite.SQLiteDatabase | null = null;
 
+// 数据库版本号 - 用于迁移
+const DB_VERSION = 2;
+
 // 1. 获取数据库实例
 const getDB = async (): Promise<SQLite.SQLiteDatabase> => {
   if (db) {
@@ -24,41 +27,74 @@ const getDB = async (): Promise<SQLite.SQLiteDatabase> => {
 export const initDatabase = async () => {
   try {
     const database = await getDB();
+
+    // 启用 WAL 模式提高性能
+    await database.execAsync(`PRAGMA journal_mode = WAL;`);
+
+    // 检查是否需要迁移：删除旧表并重建
+    // 这是简单粗暴但对新手友好的迁移策略
+    // 生产环境应该使用更精细的迁移方案
+    try {
+      // 尝试删除旧表 (如果存在)
+      await database.execAsync(`DROP TABLE IF EXISTS notes;`);
+      console.log("📦 Dropped old notes table for migration.");
+    } catch {
+      // 忽略删除失败
+    }
+
+    // 创建新表结构
     await database.execAsync(`
-      PRAGMA journal_mode = WAL;
-      
       CREATE TABLE IF NOT EXISTS notes (
-        id TEXT PRIMARY KEY NOT NULL, -- 使用服务器ID作为主键
-        title TEXT NOT NULL,
-        content TEXT,
-        date TEXT,
-        tags TEXT,                    -- JSON String
-        imageUrl TEXT,
-        categoryId TEXT,
-        structuredData TEXT,          -- JSON String
-        isSynced INTEGER DEFAULT 1    -- 1: 已同步, 0: 未同步 (本地新建)
+        id TEXT PRIMARY KEY NOT NULL,
+        title TEXT NOT NULL DEFAULT 'Untitled',
+        content TEXT DEFAULT '',
+        date TEXT DEFAULT '',
+        tags TEXT DEFAULT '[]',
+        imageUrl TEXT DEFAULT '',
+        categoryId TEXT DEFAULT '',
+        structuredData TEXT DEFAULT '{}',
+        isSynced INTEGER DEFAULT 1
       );
     `);
-    console.log("📦 SQLite database initialized.");
+
+    console.log("📦 SQLite database initialized (v" + DB_VERSION + ").");
   } catch (error) {
     console.error("❌ Failed to initialize database:", error);
   }
 };
 
 /**
- * 将 API 返回的 Note 对象转换为存储格式
+ * 将 Note 对象转换为 SQLite 存储格式
+ *
+ * 关键：处理可能缺失的字段，确保不会因为 undefined 导致插入失败
  */
-const normalizeNoteForDb = (note: Note) => {
+const normalizeNoteForDb = (note: Note): (string | number)[] => {
+  // 防御性处理：确保日期字段有值
+  const safeDate = note.date || new Date().toISOString();
+
+  // 防御性处理：确保 tags 是数组
+  let safeTags: string[] = [];
+  if (Array.isArray(note.tags)) {
+    safeTags = note.tags;
+  } else if (typeof note.tags === "string") {
+    // 如果后端返回的是字符串，尝试解析
+    try {
+      safeTags = JSON.parse(note.tags);
+    } catch {
+      safeTags = [note.tags];
+    }
+  }
+
   return [
     note.id,
-    note.title,
+    note.title || "Untitled",
     note.content || "",
-    note.date,
-    JSON.stringify(note.tags || []),
+    safeDate,
+    JSON.stringify(safeTags),
     note.imageUrl || "",
     note.categoryId || "",
     JSON.stringify(note.structuredData || {}),
-    1, // 默认为已同步
+    1, // isSynced: 默认为已同步
   ];
 };
 

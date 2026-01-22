@@ -16,37 +16,76 @@ import { useNotes } from "../../hooks/useNotes";
 import { useScanNotes } from "../../hooks/useScanNotes";
 import { useScanStore } from "../../store/useScanStore";
 
+/**
+ * HomeScreen - 首页（拍照/上传界面）
+ *
+ * 数据流向说明：
+ * ┌─────────────────────────────────────────────────────────────────────────┐
+ * │ 1. 用户选择图片 → pickedImageUri 存入 ScanStore                         │
+ * │ 2. 点击上传按钮 → useScanNotes.scanImage() 上传到后端                   │
+ * │ 3. 后端处理完成 → 返回 noteId → Modal 显示结果                          │
+ * │ 4. 点击保存按钮 → confirmAndSave(note) → 同步到本地 SQLite → 刷新列表   │
+ * └─────────────────────────────────────────────────────────────────────────┘
+ */
 export default function HomeScreen() {
   const { t } = useTranslation();
   const theme = useTheme();
 
-  // 1. Hook与状态管理
+  // =========================================================================
+  // 1. Hook 与状态管理
+  // =========================================================================
   const { pickedImageUri } = useScanStore();
   const { pickImage, clearImage } = useImagePicker();
-  const { scanImage, isScanning, scanStep, scannedNoteId, resetScan } =
-    useScanNotes();
 
-  // 2. 获取扫描结果
-  // 通过 Hook 获取数据，不再直接调用 Service
+  // useScanNotes: 管理扫描流程的核心 Hook
+  const {
+    scanImage,
+    confirmAndSave, // 新增：确认保存方法
+    isScanning,
+    scanStep,
+    scannedNoteId,
+    resetScan,
+    isSaving, // 新增：保存中状态
+  } = useScanNotes();
+
+  // =========================================================================
+  // 2. 获取扫描结果 - 通过 Hook 获取数据
+  // =========================================================================
   const { useNote } = useNotes();
   const { data: resultNote, isLoading: isFetchingResult } =
     useNote(scannedNoteId);
 
+  // =========================================================================
   // 3. 核心操作：触发上传
+  // =========================================================================
   const handleUpload = () => {
     if (!pickedImageUri) return;
     scanImage(pickedImageUri);
   };
 
-  // 4. 重置流程 (保存/关闭结果卡片)
-  const handleCloseResult = () => {
+  // =========================================================================
+  // 4. 保存笔记 - 关键逻辑
+  // =========================================================================
+  const handleSaveNote = () => {
+    if (!resultNote) return;
+
+    // 调用 Hook 的 confirmAndSave 方法：
+    // - 将笔记同步到本地 SQLite 缓存
+    // - 刷新笔记列表 (invalidateQueries)
+    // - 重置扫描状态并关闭 Modal
+    confirmAndSave(resultNote);
+    clearImage(); // 清除选中的图片
+  };
+
+  // =========================================================================
+  // 5. 取消/关闭 - 不保存直接关闭
+  // =========================================================================
+  const handleCancel = () => {
     clearImage(); // 清除本地选图
-    resetScan(); // 重置 Store 状态
-    // resultNote 会因为 scannedNoteId 变为空而自动重置
+    resetScan(); // 重置 Store 状态 (不触发保存)
   };
 
   // 计算 Modal 是否可见：只有当有 noteId 时才尝试显示
-  // 如果正在获取结果 (isFetchingResult)，Modal 内容会显示 Loading
   const isModalVisible = !!scannedNoteId;
 
   return (
@@ -150,18 +189,22 @@ export default function HomeScreen() {
       <Portal>
         <Modal
           visible={isModalVisible}
-          onDismiss={handleCloseResult}
+          onDismiss={handleCancel}
           contentContainerStyle={[
             styles.modalContainer,
             { backgroundColor: theme.colors.surface },
           ]}
         >
           {isFetchingResult || !resultNote ? (
+            // 正在加载笔记详情
             <View style={{ alignItems: "center", padding: 20 }}>
               <ActivityIndicator animating={true} />
-              <Text style={{ marginTop: 10 }}>Loading result...</Text>
+              <Text style={{ marginTop: 10 }}>
+                {t("home.loading_result") ?? "Loading result..."}
+              </Text>
             </View>
           ) : (
+            // 显示识别结果
             <>
               <Text variant="headlineSmall" style={{ marginBottom: 16 }}>
                 {t("home.result_title")}
@@ -174,13 +217,27 @@ export default function HomeScreen() {
                   </Text>
                 </Card.Content>
               </Card>
-              <Button
-                mode="contained"
-                onPress={handleCloseResult}
-                style={{ marginTop: 20 }}
-              >
-                {t("home.save_button")}
-              </Button>
+
+              {/* 操作按钮区 */}
+              <View style={styles.modalActions}>
+                <Button
+                  mode="outlined"
+                  onPress={handleCancel}
+                  style={styles.cancelButton}
+                  disabled={isSaving}
+                >
+                  {t("common.cancel")}
+                </Button>
+                <Button
+                  mode="contained"
+                  onPress={handleSaveNote}
+                  style={styles.saveButton}
+                  loading={isSaving}
+                  disabled={isSaving}
+                >
+                  {t("home.save_button")}
+                </Button>
+              </View>
             </>
           )}
         </Modal>
@@ -247,5 +304,18 @@ const styles = StyleSheet.create({
     padding: 20,
     margin: 20,
     borderRadius: 12,
+  },
+  // 新增：Modal 内的按钮区样式
+  modalActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginTop: 20,
+    gap: 12,
+  },
+  cancelButton: {
+    flex: 1,
+  },
+  saveButton: {
+    flex: 1,
   },
 });

@@ -1,7 +1,13 @@
 import { Platform } from "react-native";
 import { APP_CONFIG, ENDPOINTS } from "../constants/config";
 import i18next from "../i18n";
-import { JobStatusResponse, Note, UploadResponse } from "../types";
+import {
+  JobStatusResponse,
+  Note,
+  NotesAPIResponse,
+  RawNoteFromAPI,
+  UploadResponse,
+} from "../types";
 import api from "./api";
 import {
   deleteNoteLocally,
@@ -11,7 +17,114 @@ import {
 } from "./database";
 
 // ============================================================================
-// Mock Data
+// 字段规范化工具函数
+// ============================================================================
+
+/**
+ * 将后端返回的原始笔记数据规范化为前端统一的 Note 格式
+ *
+ * 后端字段映射：
+ * - original_text → content (后端使用 original_text 存储笔记内容)
+ * - category → categoryId (后端使用 category 存储分类名)
+ * - created_at → date
+ * - image_url → imageUrl (并转换为完整 URL)
+ * - structured_data → structuredData
+ */
+const normalizeNote = (raw: RawNoteFromAPI): Note => {
+  // 处理日期字段 (优先使用 created_at)
+  const date =
+    raw.created_at || raw.date || raw.createdAt || new Date().toISOString();
+
+  // 处理内容字段 (后端使用 original_text)
+  const content = raw.original_text || raw.content || "";
+
+  // 处理分类字段 (后端使用 category)
+  const categoryId = raw.category || raw.categoryId || raw.category_id || "";
+
+  // 处理 tags 字段 (可能是字符串或数组)
+  let tags: string[] = [];
+  if (Array.isArray(raw.tags)) {
+    tags = raw.tags;
+  } else if (typeof raw.tags === "string") {
+    try {
+      tags = JSON.parse(raw.tags);
+    } catch {
+      tags = raw.tags ? [raw.tags] : [];
+    }
+  }
+
+  // 处理结构化数据
+  const structuredData = raw.structuredData || raw.structured_data;
+
+  // 处理图片 URL
+  // 后端返回的可能是相对路径（如 /static/xxx.jpg），需要拼接服务器地址
+  let imageUrl = raw.imageUrl || raw.image_url;
+  if (imageUrl && imageUrl.startsWith("/")) {
+    // 相对路径，拼接静态资源基础 URL
+    imageUrl = `${APP_CONFIG.STATIC_BASE_URL}${imageUrl}`;
+  }
+
+  return {
+    id: raw.id,
+    title: raw.title || "Untitled",
+    content,
+    date,
+    tags,
+    imageUrl,
+    categoryId,
+    structuredData: structuredData as Note["structuredData"],
+  };
+};
+
+/**
+ * 批量规范化笔记数组
+ */
+const normalizeNotes = (rawNotes: RawNoteFromAPI[]): Note[] => {
+  return rawNotes.map(normalizeNote);
+};
+
+/**
+ * 将前端 Note 格式转换为后端 API 期望的请求格式
+ *
+ * 前端字段 → 后端字段映射：
+ * - content → original_text
+ * - categoryId → category
+ * - tags → tags (保持不变)
+ * - title → title (保持不变)
+ */
+const toAPIFormat = (note: Partial<Note>): Record<string, unknown> => {
+  const apiData: Record<string, unknown> = {};
+
+  // 标题字段 (无需转换)
+  if (note.title !== undefined) {
+    apiData.title = note.title;
+  }
+
+  // 内容字段: content → original_text
+  if (note.content !== undefined) {
+    apiData.original_text = note.content;
+  }
+
+  // 分类字段: categoryId → category
+  if (note.categoryId !== undefined) {
+    apiData.category = note.categoryId;
+  }
+
+  // 标签字段 (无需转换)
+  if (note.tags !== undefined) {
+    apiData.tags = note.tags;
+  }
+
+  // 结构化数据: structuredData → structured_data
+  if (note.structuredData !== undefined) {
+    apiData.structured_data = note.structuredData;
+  }
+
+  return apiData;
+};
+
+// ============================================================================
+// Mock Data - 使用可变数组，支持运行时增删改
 // ============================================================================
 const MOCK_NOTES: Note[] = [
   {
@@ -29,19 +142,17 @@ const MOCK_NOTES: Note[] = [
     date: new Date(Date.now() - 86400000).toISOString(),
     tags: ["learning"],
   },
-  // 模拟 AI 生成的笔记
-  {
-    id: "note-ai-generated",
-    title: "AI Recognition Result",
-    content: "This is the content generated from image recognition...",
-    date: new Date().toISOString(),
-    tags: ["AI", "Image"],
-    structuredData: {
-      summary: "Image contains...",
-      keyPoints: ["Point 1", "Point 2"],
-    },
-  },
 ];
+
+/**
+ * Helper: 向 Mock 列表添加笔记（避免重复）
+ */
+const addMockNote = (note: Note) => {
+  const exists = MOCK_NOTES.find((n) => n.id === note.id);
+  if (!exists) {
+    MOCK_NOTES.unshift(note); // 添加到列表顶部
+  }
+};
 
 const USE_MOCK = process.env.EXPO_PUBLIC_USE_MOCK === "true";
 
@@ -86,13 +197,13 @@ export const noteService = {
     try {
       const resp = await api.get<Note>(`${ENDPOINTS.LIBRARY.GET_NOTE}/${id}`);
       return resp as unknown as Note;
-    } catch (e) {
+    } catch {
       return undefined;
     }
   },
 
   /**
-   * 上传图片 Note (Mock 模式)
+   * 获取笔记列表
    */
   fetchNotes: async (): Promise<Note[]> => {
     if (USE_MOCK) {
@@ -103,12 +214,31 @@ export const noteService = {
 
     try {
       // 优先从网络获取
-      const response = await api.get<Note[]>(ENDPOINTS.LIBRARY.GET_NOTE);
-      const notes = response as unknown as Note[];
+      // 注意：后端返回 { notes: [...] } 包装对象
+      const response = await api.get<NotesAPIResponse | RawNoteFromAPI[]>(
+        ENDPOINTS.LIBRARY.GET_NOTE,
+      );
+
+      // 处理两种可能的响应格式：{ notes: [...] } 或直接 [...]
+      let rawNotes: RawNoteFromAPI[];
+      if (response && typeof response === "object" && "notes" in response) {
+        // 后端返回 { notes: [...] } 格式
+        rawNotes = (response as NotesAPIResponse).notes || [];
+      } else if (Array.isArray(response)) {
+        // 直接返回数组格式
+        rawNotes = response as RawNoteFromAPI[];
+      } else {
+        console.warn("Unexpected fetchNotes response format:", response);
+        rawNotes = [];
+      }
+
+      // 关键：规范化后端返回的数据
+      const notes = normalizeNotes(rawNotes);
+      console.log(`[Service] Fetched ${notes.length} notes from API`);
 
       // 如果网络请求成功，缓存到本地数据库 (Cache Aside Pattern)
-      if (notes && Array.isArray(notes)) {
-        saveNotesToLocal(notes).catch((err: any) =>
+      if (notes && notes.length > 0) {
+        saveNotesToLocal(notes).catch((err: unknown) =>
           console.warn("Sync to local DB failed:", err),
         );
       }
@@ -143,13 +273,16 @@ export const noteService = {
         tags: ["mock-detail"],
       };
     }
-    const response = await api.get<Note>(
+
+    // 真实 API：获取并规范化
+    const response = await api.get<RawNoteFromAPI>(
       `${ENDPOINTS.LIBRARY.GET_NOTE}/${noteId}`,
     );
-    const note = response as unknown as Note;
+    const rawNote = response as unknown as RawNoteFromAPI;
+    const note = normalizeNote(rawNote);
 
     // 获取单条详情成功后，也更新本地缓存，确保离线可用
-    saveNoteLocally(note).catch((err: any) =>
+    saveNoteLocally(note).catch((err: unknown) =>
       console.warn("Save note locally failed:", err),
     );
 
@@ -163,18 +296,21 @@ export const noteService = {
     if (USE_MOCK) {
       console.log("[Mock API] createNote called", newNote);
       await new Promise((resolve) => setTimeout(resolve, 800));
-      return {
+      const created: Note = {
         ...newNote,
         id: Math.random().toString(36).substr(2, 9),
         date: new Date().toISOString(),
       };
+      // 关键：将新笔记添加到 Mock 列表
+      addMockNote(created);
+      return created;
     }
 
     const response = await api.post<Note>(ENDPOINTS.LIBRARY.GET_NOTE, newNote);
     const createdNote = response as unknown as Note;
 
     // 成功后同步保存到本地
-    saveNoteLocally(createdNote).catch((err: any) =>
+    saveNoteLocally(createdNote).catch((err: unknown) =>
       console.warn("Save local failed:", err),
     );
 
@@ -188,12 +324,17 @@ export const noteService = {
     if (USE_MOCK) {
       console.log("[Mock API] deleteNote called", id);
       await new Promise((resolve) => setTimeout(resolve, 500));
+      // 关键：从 Mock 列表中移除
+      const index = MOCK_NOTES.findIndex((n) => n.id === id);
+      if (index !== -1) {
+        MOCK_NOTES.splice(index, 1);
+      }
       return;
     }
     await api.delete(`${ENDPOINTS.LIBRARY.GET_NOTE}/${id}`);
 
     // 成功后删除本地
-    deleteNoteLocally(id).catch((err: any) =>
+    deleteNoteLocally(id).catch((err: unknown) =>
       console.warn("Delete local failed:", err),
     );
   },
@@ -205,24 +346,58 @@ export const noteService = {
     if (USE_MOCK) {
       console.log("[Mock API] updateNote called", id, updatedNote);
       await new Promise((resolve) => setTimeout(resolve, 500));
-      const existing = MOCK_NOTES.find((n) => n.id === id);
-      if (existing) {
-        return { ...existing, ...updatedNote };
+      const index = MOCK_NOTES.findIndex((n) => n.id === id);
+      if (index !== -1) {
+        MOCK_NOTES[index] = { ...MOCK_NOTES[index], ...updatedNote };
+        return MOCK_NOTES[index];
       }
       throw new Error("Note not found in mock");
     }
-    const response = await api.put<Note>(
+
+    // 关键：将前端 Note 格式转换为后端 API 期望的格式
+    const apiPayload = toAPIFormat(updatedNote);
+    console.log("[Service] updateNote API payload:", apiPayload);
+
+    const response = await api.put<RawNoteFromAPI>(
       `${ENDPOINTS.LIBRARY.GET_NOTE}/${id}`,
-      updatedNote,
+      apiPayload,
     );
-    const finalNote = response as unknown as Note;
+
+    // 规范化后端返回的数据
+    const rawNote = response as unknown as RawNoteFromAPI;
+    const finalNote = normalizeNote(rawNote);
 
     // 成功后更新本地
-    saveNoteLocally(finalNote).catch((err: any) =>
+    saveNoteLocally(finalNote).catch((err: unknown) =>
       console.warn("Update local failed:", err),
     );
 
     return finalNote;
+  },
+
+  // =========================================================================
+  // 同步笔记到本地缓存 (供 Hook 层调用，不涉及网络请求)
+  // =========================================================================
+  /**
+   * 将单条笔记同步到本地 SQLite 缓存
+   *
+   * 使用场景：
+   * - 用户点击"保存"按钮后，将已从后端获取的笔记持久化到本地
+   * - 确保离线时也能访问该笔记
+   *
+   * @param note - 完整的笔记对象
+   */
+  syncNoteToLocal: async (note: Note): Promise<void> => {
+    if (USE_MOCK) {
+      // Mock 模式：确保笔记在内存列表中
+      console.log("[Mock] syncNoteToLocal called", note.id);
+      addMockNote(note);
+      return;
+    }
+
+    // 非 Mock 模式：写入 SQLite
+    console.log("[Service] Syncing note to local SQLite:", note.id);
+    await saveNoteLocally(note);
   },
 
   /**
@@ -286,9 +461,22 @@ export const noteService = {
       await new Promise((resolve) => setTimeout(resolve, 300));
 
       const random = Math.random();
-      if (random > 0.7) {
-        return { status: "completed", note_id: "note-ai-generated" };
-      } else if (random > 0.4) {
+      // 提高完成概率便于测试
+      if (random > 0.4) {
+        // 生成唯一的 noteId 并创建对应的笔记
+        const noteId = `note-ai-${jobId}`;
+
+        // 关键：在 Mock 模式下，当任务完成时创建对应的笔记
+        addMockNote({
+          id: noteId,
+          title: "AI 识别结果 (Mock)",
+          content: `这是模拟 AI 识别生成的笔记内容。\n\n任务 ID: ${jobId}\n生成时间: ${new Date().toLocaleString()}`,
+          date: new Date().toISOString(),
+          tags: ["AI", "扫描"],
+        });
+
+        return { status: "completed", note_id: noteId };
+      } else if (random > 0.2) {
         return { status: "processing" };
       } else {
         return { status: "pending" };

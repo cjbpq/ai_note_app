@@ -1,4 +1,11 @@
-import React from "react";
+/**
+ * 笔记卡片组件
+ * 用于在列表中展示笔记摘要信息
+ * 支持图片缩略图展示
+ */
+import { Image } from "expo-image";
+import React, { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { StyleSheet, View } from "react-native";
 import { Card, Chip, Text, useTheme } from "react-native-paper";
 
@@ -7,6 +14,7 @@ type NoteCardProps = {
   content: string;
   date?: string;
   tags?: string[];
+  imageUrl?: string; // 新增：图片URL
   onPress?: () => void;
 };
 
@@ -15,19 +23,38 @@ export default function NoteCard({
   content,
   date,
   tags = [],
+  imageUrl,
   onPress,
 }: NoteCardProps) {
+  const { t } = useTranslation();
   // 1. 获取当前主题颜色
   const theme = useTheme();
+  // 2. 图片加载状态
+  const [imageError, setImageError] = useState(false);
 
   return (
     <Card
-      // 2. 将样式分为两部分：布局用 styles，颜色/外观用 Paper 属性或 theme
+      // 3. 将样式分为两部分：布局用 styles，颜色/外观用 Paper 属性或 theme
       style={[styles.card, { backgroundColor: theme.colors.elevation.level1 }]}
       onPress={onPress}
       mode="elevated"
     >
-      <Card.Content>
+      {/* 如果有图片URL且加载没有错误，显示缩略图 */}
+      {imageUrl && !imageError && (
+        <View style={styles.imageWrapper}>
+          <Image
+            source={{ uri: imageUrl }}
+            style={styles.thumbnail}
+            contentFit="cover"
+            transition={200}
+            onError={() => setImageError(true)}
+          />
+        </View>
+      )}
+
+      <Card.Content
+        style={imageUrl && !imageError ? styles.contentWithImage : undefined}
+      >
         <Text variant="titleMedium" style={{ color: theme.colors.onSurface }}>
           {title}
         </Text>
@@ -55,12 +82,12 @@ export default function NoteCard({
               variant="bodySmall"
               style={[styles.tagLabel, { color: theme.colors.secondary }]}
             >
-              标签：
+              {t("noteCard.tags_label")}
             </Text>
             <View style={styles.tagsWrap}>
-              {tags.map((t) => (
+              {tags.map((tag) => (
                 <Chip
-                  key={t}
+                  key={tag}
                   style={[
                     styles.tag,
                     { backgroundColor: theme.colors.secondaryContainer },
@@ -68,7 +95,7 @@ export default function NoteCard({
                   textStyle={{ color: theme.colors.onSecondaryContainer }}
                   compact
                 >
-                  {t}
+                  {tag}
                 </Chip>
               ))}
             </View>
@@ -84,7 +111,22 @@ const styles = StyleSheet.create({
   card: {
     marginHorizontal: 16,
     marginVertical: 8,
-    borderRadius: 12, // 这里的圆角其实 Card 默认也有，可以根据设计图调整
+    borderRadius: 12,
+    overflow: "hidden", // 确保图片圆角生效
+  },
+  // 图片包装器样式
+  imageWrapper: {
+    width: "100%",
+    height: 120, // 缩略图高度
+    overflow: "hidden",
+  },
+  thumbnail: {
+    width: "100%",
+    height: "100%",
+  },
+  // 有图片时的内容区域样式
+  contentWithImage: {
+    paddingTop: 12,
   },
   date: {
     marginTop: 4,

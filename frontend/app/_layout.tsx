@@ -60,8 +60,21 @@ export default function RootLayout() {
     <QueryClientProvider client={queryClient}>
       <PaperProvider>
         <Stack>
+          {/* Tab 导航组 - 主要页面 */}
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          {/* 登录页面 */}
           <Stack.Screen name="login" options={{ headerShown: false }} />
+          {/* 笔记详情页面 - 使用动态路由 */}
+          <Stack.Screen
+            name="note/[id]"
+            options={{
+              headerShown: true,
+              // 使用 presentation: 'card' 实现从右侧滑入的效果
+              presentation: "card",
+              // 允许手势返回
+              gestureEnabled: true,
+            }}
+          />
         </Stack>
       </PaperProvider>
     </QueryClientProvider>
