@@ -23,7 +23,24 @@ class NoteUpdate(BaseModel):
     original_text: Optional[str] = None
     structured_data: Optional[Dict[str, Any]] = None
 
+class NoteSummary(NoteBase):
+    """轻量级笔记模型，用于列表展示（不包含大字段 original_text 和 structured_data）"""
+    id: uuid.UUID
+    user_id: Optional[str] = None
+    device_id: str
+    image_url: str
+    image_filename: str
+    image_size: int
+    is_favorite: bool
+    is_archived: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
 class NoteResponse(NoteBase):
+    """完整笔记模型，用于详情展示（包含所有字段）"""
     id: uuid.UUID
     user_id: Optional[str] = None
     device_id: str
@@ -41,7 +58,7 @@ class NoteResponse(NoteBase):
         from_attributes = True
 
 class NoteListResponse(BaseModel):
-    notes: List[NoteResponse]
+    notes: List[NoteSummary]
     total: int
 
 class ExportFormat(BaseModel):

@@ -39,7 +39,10 @@
       "Bash(D:/flutter/flutter/bin/flutter.bat analyze:*)",
       "Bash(/d/flutter/flutter/bin/flutter gen-l10n:*)",
       "Bash(/d/flutter/flutter/bin/flutter analyze:*)",
-      "Bash(/d/flutter/flutter/bin/flutter build:*)"
+      "Bash(/d/flutter/flutter/bin/flutter build:*)",
+      "Bash(/d/flutter/flutter/bin/flutter pub:*)",
+      "Bash(cmd.exe /c \"ipconfig\")",
+      "Bash(powershell.exe -Command \"(Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_InterfaceAlias -notlike ''*Loopback*''}).IPAddress\")"
     ],
     "deny": [],
     "ask": []

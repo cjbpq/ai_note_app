@@ -337,7 +337,8 @@ async def search_notes(
     note_service = NoteService(db)
 
     if note_id:
-        note = note_service.get_note_by_id(note_id, current_user.id)
+        # 按 ID 查询也使用轻量级数据，如需完整数据请使用 GET /notes/{id}
+        note = note_service.get_note_summary_by_id(note_id, current_user.id)
         if not note:
             raise HTTPException(status_code=404, detail="无法找到该笔记")
         return NoteListResponse(notes=[note], total=1)
