@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Alert } from "react-native";
+
 import i18n from "../i18n";
 import { noteService } from "../services/noteService";
 import { useScanStore } from "../store/useScanStore";
+import { useToastStore } from "../store/useToastStore";
 import { Note } from "../types";
 
 /**
@@ -24,6 +25,7 @@ import { Note } from "../types";
  */
 export const useScanNotes = () => {
   const queryClient = useQueryClient();
+  const { showToast } = useToastStore();
 
   // 引入 Zustand Store 管理跨页面的扫描状态
   const {
@@ -56,6 +58,11 @@ export const useScanNotes = () => {
         setScanStep("processing");
         console.log("[useScanNotes] Upload done, Job ID:", uploadRes.job_id);
 
+        // 防御性检查：确保 job_id 存在
+        if (!uploadRes.job_id) {
+          throw new Error("Upload response missing job_id");
+        }
+
         // Step D: 轮询等待后端处理完成
         const noteId = await noteService.waitForJobCompletion(uploadRes.job_id);
 
@@ -76,7 +83,8 @@ export const useScanNotes = () => {
     onError: (error: Error) => {
       console.error("[useScanNotes] Scan failed:", error);
       setScanError(error.message || i18n.t("errors.scan_failed"));
-      Alert.alert(i18n.t("common.error"), i18n.t("errors.scan_failed"));
+      // 使用 Toast 替代 Alert（扫描失败不需要强制用户操作）
+      showToast(i18n.t("toast.scan_failed"), "error");
     },
   });
 
@@ -95,6 +103,8 @@ export const useScanNotes = () => {
         "[useScanNotes] Note saved to local cache, refreshing list...",
       );
 
+      showToast(i18n.t("toast.save_success"), "success");
+
       // 关键：刷新笔记列表缓存，让 read 界面能看到新笔记
       queryClient.invalidateQueries({ queryKey: ["notes"] });
 
@@ -106,7 +116,8 @@ export const useScanNotes = () => {
     },
     onError: (error: Error) => {
       console.error("[useScanNotes] Failed to save note:", error);
-      Alert.alert(i18n.t("common.error"), i18n.t("errors.save_failed"));
+      // 使用 Toast 替代 Alert（保存失败不需要强制用户操作）
+      showToast(i18n.t("toast.save_failed"), "error");
     },
   });
 

@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { KeyboardAvoidingView, Platform, StyleSheet, View } from "react-native";
 import {
@@ -9,35 +9,45 @@ import {
   TextInput,
   useTheme,
 } from "react-native-paper";
+import { APP_CONFIG } from "../constants/config";
 import { useAuth } from "../hooks/useAuth";
+import { useToast } from "../hooks/useToast";
 
-export default function LoginScreen() {
+export default function RegisterScreen() {
   const { t } = useTranslation();
   const theme = useTheme();
   const router = useRouter();
-  const { login, isLoggingIn, loginError } = useAuth(); // 使用封装好的 Hook
+  const { register, isRegistering, registerError } = useAuth();
+  const { showSuccess, showError } = useToast();
 
-  // UI State
+  // UI state 仅在本页使用，避免无谓的全局存储
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
 
-  // 简单的表单校验状态
-  const hasErrors = () => {
-    return !username || !password;
-  };
+  const hasErrors = useMemo(() => {
+    if (!username || !email || !password) return true;
+    if (username.length < APP_CONFIG.VALIDATION.USERNAME_MIN) return true;
+    if (password.length < APP_CONFIG.VALIDATION.PASSWORD_MIN) return true;
+    // 基础邮箱校验，防止明显错误
+    const emailRegex = /^[\w-.]+@([\w-]+\.)+[\w-]{2,4}$/;
+    if (!emailRegex.test(email)) return true;
+    return false;
+  }, [username, email, password]);
 
-  const handleLogin = () => {
-    if (hasErrors()) return;
+  const handleRegister = () => {
+    if (hasErrors) return;
 
-    // 调用 Hook 中的 login 方法
-    login(
-      { username, password },
+    register(
+      { username, email, password },
       {
         onSuccess: () => {
-          // 登录成功后，路由跳转由 _layout 守卫或 Hook 内部处理均可
-          // 此处做个显式跳转更稳健
-          router.replace("/(tabs)");
+          showSuccess(t("auth.register_success"));
+          router.replace("/login");
+        },
+        onError: (error) => {
+          showError(error?.message ?? t("auth.register_failed"));
         },
       },
     );
@@ -57,10 +67,10 @@ export default function LoginScreen() {
           AI Note App
         </Text>
         <Text variant="bodyLarge" style={styles.subtitle}>
-          {t("auth.login_button")}
+          {t("auth.register_button")}
         </Text>
 
-        {/* Username Input */}
+        {/* Username */}
         <TextInput
           label={t("auth.username_placeholder")}
           value={username}
@@ -70,7 +80,19 @@ export default function LoginScreen() {
           left={<TextInput.Icon icon="account" />}
         />
 
-        {/* Password Input */}
+        {/* Email */}
+        <TextInput
+          label={t("auth.email_placeholder")}
+          value={email}
+          onChangeText={setEmail}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          mode="outlined"
+          style={styles.input}
+          left={<TextInput.Icon icon="email" />}
+        />
+
+        {/* Password */}
         <TextInput
           label={t("auth.password_placeholder")}
           value={password}
@@ -88,36 +110,37 @@ export default function LoginScreen() {
         />
 
         {/* Error Feedback */}
-        {loginError ? (
-          <HelperText type="error" visible={!!loginError} style={styles.error}>
-            {/* 如果 error 是 Error 对象，取 message，实际项目中建议i18n处理后端错误码 */}
-            {loginError instanceof Error
-              ? loginError.message
-              : t("auth.login_failed")}
+        {registerError ? (
+          <HelperText
+            type="error"
+            visible={!!registerError}
+            style={styles.error}
+          >
+            {registerError instanceof Error
+              ? registerError.message
+              : t("auth.register_failed")}
           </HelperText>
         ) : null}
 
-        {/* Action Button */}
+        {/* Submit */}
         <Button
           mode="contained"
-          onPress={handleLogin}
-          loading={isLoggingIn}
-          disabled={isLoggingIn || !username || !password}
+          onPress={handleRegister}
+          loading={isRegistering}
+          disabled={isRegistering || hasErrors}
           style={styles.button}
           contentStyle={styles.buttonContent}
         >
-          {t("auth.login_button")}
+          {t("auth.register_button")}
         </Button>
 
-        {/* Switch to Register */}
+        {/* Back to Login */}
         <Button
           mode="text"
-          onPress={() => {
-            router.push("/register");
-          }}
+          onPress={() => router.replace("/login")}
           style={styles.textButton}
         >
-          {t("auth.switch_to_register")}
+          {t("auth.switch_to_login")}
         </Button>
       </View>
     </KeyboardAvoidingView>

@@ -1,3 +1,4 @@
+import { AxiosError } from "axios";
 import { Platform } from "react-native";
 import { APP_CONFIG, ENDPOINTS } from "../constants/config";
 import i18next from "../i18n";
@@ -6,11 +7,15 @@ import {
   Note,
   NotesAPIResponse,
   RawNoteFromAPI,
+  RawSmartNoteData,
+  SmartNoteData,
+  SmartNoteMeta,
   UploadResponse,
 } from "../types";
 import api from "./api";
 import {
   deleteNoteLocally,
+  fetchLocalNoteById,
   fetchLocalNotes,
   saveNoteLocally,
   saveNotesToLocal,
@@ -21,27 +26,84 @@ import {
 // ============================================================================
 
 /**
- * 将后端返回的原始笔记数据规范化为前端统一的 Note 格式
+ * 将后端 structured_data (snake_case) 转换为前端 SmartNoteData (camelCase)
  *
- * 后端字段映射：
- * - original_text → content (后端使用 original_text 存储笔记内容)
- * - category → categoryId (后端使用 category 存储分类名)
- * - created_at → date
- * - image_url → imageUrl (并转换为完整 URL)
- * - structured_data → structuredData
+ * 转换映射：
+ * - raw_text → rawText
+ * - key_points → keyPoints
+ * - study_advice → studyAdvice
+ * - meta.prompt_profile → meta.promptProfile
+ * - meta.original_note_type → meta.originalNoteType
+ *
+ * 注意：meta.response（AI 原始响应体）体积大且前端不使用，直接丢弃
+ */
+const normalizeStructuredData = (
+  raw: RawSmartNoteData | Record<string, unknown> | undefined,
+): SmartNoteData | undefined => {
+  if (!raw || typeof raw !== "object") return undefined;
+
+  const data = raw as RawSmartNoteData;
+
+  // 如果 data 中没有任何有意义的字段，视为空
+  if (!data.title && !data.summary && !data.sections && !data.key_points) {
+    return undefined;
+  }
+
+  // 转换 meta 对象
+  let meta: SmartNoteMeta | undefined;
+  if (data.meta && typeof data.meta === "object") {
+    meta = {
+      subject: data.meta.subject,
+      promptProfile: data.meta.prompt_profile,
+      warnings: data.meta.warnings,
+      tags: data.meta.tags,
+      originalNoteType: data.meta.original_note_type,
+      provider: data.meta.provider,
+      // 故意不映射 meta.response — 体积大且前端不需要
+    };
+  }
+
+  return {
+    title: data.title,
+    summary: data.summary,
+    rawText: data.raw_text,
+    sections: data.sections, // 内部字段 heading/content 无需转换
+    keyPoints: data.key_points,
+    studyAdvice: data.study_advice,
+    meta,
+  };
+};
+
+/**
+ * 将后端原始笔记数据规范化为前端统一的 Note 格式
+ *
+ * 完整字段映射表：
+ * | 后端 (snake_case)  | 前端 (camelCase)  |
+ * |--------------------|-------------------|
+ * | original_text      | content           |
+ * | created_at         | date              |
+ * | updated_at         | updatedAt         |
+ * | image_url          | imageUrl          |
+ * | image_filename     | imageFilename     |
+ * | image_size         | imageSize         |
+ * | is_favorite        | isFavorite        |
+ * | is_archived        | isArchived        |
+ * | user_id            | userId            |
+ * | device_id          | deviceId          |
+ * | structured_data    | structuredData (经 normalizeStructuredData 深度转换) |
  */
 const normalizeNote = (raw: RawNoteFromAPI): Note => {
-  // 处理日期字段 (优先使用 created_at)
+  // 日期：优先 created_at
   const date =
     raw.created_at || raw.date || raw.createdAt || new Date().toISOString();
 
-  // 处理内容字段 (后端使用 original_text)
+  // 内容：优先 original_text
   const content = raw.original_text || raw.content || "";
 
-  // 处理分类字段 (后端使用 category)
-  const categoryId = raw.category || raw.categoryId || raw.category_id || "";
+  // 分类
+  const category = raw.category || raw.categoryId || raw.category_id || "";
 
-  // 处理 tags 字段 (可能是字符串或数组)
+  // 标签：处理可能的字符串或数组
   let tags: string[] = [];
   if (Array.isArray(raw.tags)) {
     tags = raw.tags;
@@ -53,26 +115,34 @@ const normalizeNote = (raw: RawNoteFromAPI): Note => {
     }
   }
 
-  // 处理结构化数据
-  const structuredData = raw.structuredData || raw.structured_data;
-
-  // 处理图片 URL
-  // 后端返回的可能是相对路径（如 /static/xxx.jpg），需要拼接服务器地址
+  // 图片 URL：相对路径拼接完整地址
   let imageUrl = raw.imageUrl || raw.image_url;
   if (imageUrl && imageUrl.startsWith("/")) {
-    // 相对路径，拼接静态资源基础 URL
     imageUrl = `${APP_CONFIG.STATIC_BASE_URL}${imageUrl}`;
   }
+
+  // 结构化数据：深度 snake_case → camelCase 转换
+  const rawStructured = raw.structured_data || raw.structuredData;
+  const structuredData = normalizeStructuredData(
+    rawStructured as RawSmartNoteData | undefined,
+  );
 
   return {
     id: raw.id,
     title: raw.title || "Untitled",
     content,
     date,
+    updatedAt: raw.updated_at,
     tags,
     imageUrl,
-    categoryId,
-    structuredData: structuredData as Note["structuredData"],
+    imageFilename: raw.image_filename,
+    imageSize: raw.image_size,
+    category,
+    isFavorite: raw.is_favorite ?? false,
+    isArchived: raw.is_archived ?? false,
+    userId: raw.user_id,
+    deviceId: raw.device_id,
+    structuredData,
   };
 };
 
@@ -84,13 +154,15 @@ const normalizeNotes = (rawNotes: RawNoteFromAPI[]): Note[] => {
 };
 
 /**
- * 将前端 Note 格式转换为后端 API 期望的请求格式
+ * 将前端 Note 格式转换为后端 API 期望的请求格式 (camelCase → snake_case)
  *
  * 前端字段 → 后端字段映射：
  * - content → original_text
- * - categoryId → category
+ * - category → category (保持不变)
  * - tags → tags (保持不变)
  * - title → title (保持不变)
+ * - isFavorite → is_favorite
+ * - structuredData → structured_data (经 reverseStructuredData 反向转换)
  */
 const toAPIFormat = (note: Partial<Note>): Record<string, unknown> => {
   const apiData: Record<string, unknown> = {};
@@ -105,9 +177,9 @@ const toAPIFormat = (note: Partial<Note>): Record<string, unknown> => {
     apiData.original_text = note.content;
   }
 
-  // 分类字段: categoryId → category
-  if (note.categoryId !== undefined) {
-    apiData.category = note.categoryId;
+  // 分类字段: category → category
+  if (note.category !== undefined) {
+    apiData.category = note.category;
   }
 
   // 标签字段 (无需转换)
@@ -115,12 +187,46 @@ const toAPIFormat = (note: Partial<Note>): Record<string, unknown> => {
     apiData.tags = note.tags;
   }
 
-  // 结构化数据: structuredData → structured_data
+  // 结构化数据: structuredData → structured_data (反向深度转换)
   if (note.structuredData !== undefined) {
-    apiData.structured_data = note.structuredData;
+    apiData.structured_data = reverseStructuredData(note.structuredData);
+  }
+
+  // 收藏字段: isFavorite → is_favorite
+  if (note.isFavorite !== undefined) {
+    apiData.is_favorite = note.isFavorite;
   }
 
   return apiData;
+};
+
+/**
+ * 将前端 SmartNoteData 反向转为后端 snake_case 格式
+ * 仅在需要提交 structured_data 修改时使用
+ */
+const reverseStructuredData = (
+  data: SmartNoteData | undefined,
+): Record<string, unknown> | undefined => {
+  if (!data) return undefined;
+
+  return {
+    title: data.title,
+    summary: data.summary,
+    raw_text: data.rawText,
+    sections: data.sections,
+    key_points: data.keyPoints,
+    study_advice: data.studyAdvice,
+    meta: data.meta
+      ? {
+          subject: data.meta.subject,
+          prompt_profile: data.meta.promptProfile,
+          warnings: data.meta.warnings,
+          tags: data.meta.tags,
+          original_note_type: data.meta.originalNoteType,
+          provider: data.meta.provider,
+        }
+      : undefined,
+  };
 };
 
 // ============================================================================
@@ -155,6 +261,35 @@ const addMockNote = (note: Note) => {
 };
 
 const USE_MOCK = process.env.EXPO_PUBLIC_USE_MOCK === "true";
+
+/**
+ * 提取后端错误信息，优先使用 detail.msg，避免 UI 处理 axios 细节
+ */
+const extractApiErrorMessage = (
+  error: unknown,
+  fallbackKey: string,
+): string => {
+  if (error instanceof AxiosError) {
+    const data = error.response?.data as any;
+    if (Array.isArray(data?.detail) && data.detail.length > 0) {
+      const first = data.detail[0];
+      const msg = first?.msg as string | undefined;
+      const loc = Array.isArray(first?.loc) ? first.loc.join(".") : undefined;
+      if (msg) {
+        return loc ? `${loc}: ${msg}` : msg;
+      }
+    }
+    if (typeof data?.message === "string") {
+      return data.message;
+    }
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return i18next.t(fallbackKey);
+};
 
 // ============================================================================
 // Service Implementation
@@ -237,11 +372,10 @@ export const noteService = {
       console.log(`[Service] Fetched ${notes.length} notes from API`);
 
       // 如果网络请求成功，缓存到本地数据库 (Cache Aside Pattern)
-      if (notes && notes.length > 0) {
-        saveNotesToLocal(notes).catch((err: unknown) =>
-          console.warn("Sync to local DB failed:", err),
-        );
-      }
+      // 注意：即便 notes 为空，也需要覆盖本地缓存，避免残留旧账号/旧数据
+      saveNotesToLocal(notes).catch((err: unknown) =>
+        console.warn("Sync to local DB failed:", err),
+      );
 
       return notes;
     } catch (error) {
@@ -331,12 +465,22 @@ export const noteService = {
       }
       return;
     }
-    await api.delete(`${ENDPOINTS.LIBRARY.GET_NOTE}/${id}`);
+    // 本地优先删除，失败时回滚
+    const localNote = await fetchLocalNoteById(id);
 
-    // 成功后删除本地
-    deleteNoteLocally(id).catch((err: unknown) =>
-      console.warn("Delete local failed:", err),
-    );
+    await deleteNoteLocally(id);
+
+    try {
+      await api.delete(`${ENDPOINTS.LIBRARY.GET_NOTE}/${id}`);
+    } catch (error) {
+      // API 失败时回滚本地删除，保证离线一致性
+      if (localNote) {
+        saveNoteLocally(localNote).catch((err: unknown) =>
+          console.warn("Rollback local failed:", err),
+        );
+      }
+      throw error;
+    }
   },
 
   /**
@@ -373,6 +517,38 @@ export const noteService = {
     );
 
     return finalNote;
+  },
+
+  /**
+   * 切换收藏状态
+   */
+  toggleFavorite: async (id: string): Promise<Note> => {
+    if (USE_MOCK) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const index = MOCK_NOTES.findIndex((n) => n.id === id);
+      if (index === -1) {
+        throw new Error(i18next.t("service.note_not_found"));
+      }
+      const current = MOCK_NOTES[index];
+      const nextFavorite = !current.isFavorite;
+      const updated = { ...current, isFavorite: nextFavorite };
+      MOCK_NOTES[index] = updated;
+      return updated;
+    }
+
+    try {
+      const response = await api.post<RawNoteFromAPI>(
+        ENDPOINTS.LIBRARY.TOGGLE_FAVORITE(id),
+      );
+      const rawNote = response as unknown as RawNoteFromAPI;
+      const finalNote = normalizeNote(rawNote);
+      saveNoteLocally(finalNote).catch((err: unknown) =>
+        console.warn("Save favorite locally failed:", err),
+      );
+      return finalNote;
+    } catch (error) {
+      throw new Error(extractApiErrorMessage(error, "service.favorite_failed"));
+    }
   },
 
   // =========================================================================
@@ -415,6 +591,7 @@ export const noteService = {
       return {
         job_id: "mock-job-" + Date.now().toString(),
         note_id: "mock-note-" + Date.now().toString(),
+        status: "ENQUEUED",
       };
     }
 

@@ -3,27 +3,21 @@
  * 用于在列表中展示笔记摘要信息
  * 支持图片缩略图展示
  */
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { Image } from "expo-image";
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, View } from "react-native";
 import { Card, Chip, Text, useTheme } from "react-native-paper";
-
-type NoteCardProps = {
-  title: string;
-  content: string;
-  date?: string;
-  tags?: string[];
-  imageUrl?: string; // 新增：图片URL
-  onPress?: () => void;
-};
+import { NoteCardProps } from "../types";
 
 export default function NoteCard({
   title,
-  content,
+  // content,
   date,
   tags = [],
   imageUrl,
+  isFavorite,
   onPress,
 }: NoteCardProps) {
   const { t } = useTranslation();
@@ -49,6 +43,16 @@ export default function NoteCard({
             transition={200}
             onError={() => setImageError(true)}
           />
+          {isFavorite ? (
+            <View
+              style={[
+                styles.favoriteBadge,
+                { backgroundColor: theme.colors.backdrop },
+              ]}
+            >
+              <Ionicons name="heart" size={18} color={theme.colors.error} />
+            </View>
+          ) : null}
         </View>
       )}
 
@@ -68,13 +72,14 @@ export default function NoteCard({
           </Text>
         )}
 
-        <Text
+        {/* 移除内容摘要展示 */}
+        {/* <Text
           variant="bodyMedium"
           numberOfLines={3}
           style={[styles.content, { color: theme.colors.onSurfaceVariant }]}
         >
           {content}
-        </Text>
+        </Text> */}
 
         {tags.length > 0 && (
           <View style={styles.tagLabelContainer}>
@@ -119,10 +124,18 @@ const styles = StyleSheet.create({
     width: "100%",
     height: 120, // 缩略图高度
     overflow: "hidden",
+    position: "relative",
   },
   thumbnail: {
     width: "100%",
     height: "100%",
+  },
+  favoriteBadge: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    borderRadius: 16,
+    padding: 4,
   },
   // 有图片时的内容区域样式
   contentWithImage: {
@@ -131,9 +144,9 @@ const styles = StyleSheet.create({
   date: {
     marginTop: 4,
   },
-  content: {
-    marginTop: 8,
-  },
+  // content: {
+  //   marginTop: 8,
+  // },
   tagLabelContainer: {
     marginTop: 12,
   },

@@ -41,3 +41,10 @@ app-example
 # generated native folders
 /ios
 /android
+
+# KaTeX offline font temp artifacts (generated during mathAssets build)
+/assets/fonts/KaTeX_*
+/assets/fonts/*.base64
+*.woff.base64
+*.woff2.base64
+*.ttf.base64

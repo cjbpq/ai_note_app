@@ -1,22 +1,34 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import i18next from "../i18n";
 import { noteService } from "../services/noteService";
+import { useAuthStore } from "../store/useAuthStore";
+import { Note } from "../types";
+import { useToast } from "./useToast";
 
 export const useNotes = () => {
   const queryClient = useQueryClient();
+  const { showSuccess, showError } = useToast();
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const userId = useAuthStore((state) => state.user?.id) ?? "anonymous";
+
+  // 关键：QueryKey 必须包含 userId，避免切换账号后复用旧缓存
+  const notesKey = ["notes", userId] as const;
+  const noteKey = (id: string | null) => ["note", userId, id] as const;
 
   // 1. 获取笔记列表 (Read)
   const notesQuery = useQuery({
-    queryKey: ["notes"],
+    queryKey: notesKey,
     queryFn: noteService.fetchNotes,
+    enabled: isAuthenticated,
     staleTime: 1000 * 60 * 5, // 5分钟内数据视为新鲜
   });
 
   // 1.5 获取单条笔记 (Read Single)
   const useNote = (id: string | null) => {
     return useQuery({
-      queryKey: ["note", id],
+      queryKey: noteKey(id),
       queryFn: () => noteService.getNoteById(id!),
-      enabled: !!id, // 只有当 id 存在时才请求
+      enabled: isAuthenticated && !!id, // 只有当已登录且 id 存在时才请求
       staleTime: 1000 * 60 * 5,
     });
   };
@@ -25,7 +37,7 @@ export const useNotes = () => {
   const addNoteMutation = useMutation({
     mutationFn: noteService.createNote,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["notes"] });
+      queryClient.invalidateQueries({ queryKey: notesKey });
     },
   });
 
@@ -37,7 +49,7 @@ export const useNotes = () => {
     }: { id: string } & Partial<import("../types").Note>) =>
       noteService.updateNote(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["notes"] });
+      queryClient.invalidateQueries({ queryKey: notesKey });
     },
   });
 
@@ -45,7 +57,74 @@ export const useNotes = () => {
   const deleteNoteMutation = useMutation({
     mutationFn: noteService.deleteNote,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["notes"] });
+      queryClient.invalidateQueries({ queryKey: notesKey });
+    },
+  });
+
+  // 5. 切换收藏状态 (Favorite)
+  const toggleFavoriteMutation = useMutation({
+    mutationFn: (id: string) => noteService.toggleFavorite(id),
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({ queryKey: noteKey(id) });
+      await queryClient.cancelQueries({ queryKey: notesKey });
+
+      const previousNote = queryClient.getQueryData<Note>(noteKey(id));
+      const previousNotes = queryClient.getQueryData<Note[]>(notesKey);
+
+      const toggleFlag = (isFav?: boolean) => !(isFav ?? false);
+
+      if (previousNote) {
+        queryClient.setQueryData<Note>(noteKey(id), {
+          ...previousNote,
+          isFavorite: toggleFlag(previousNote.isFavorite),
+        });
+      }
+
+      if (previousNotes) {
+        queryClient.setQueryData<Note[]>(notesKey, (old) => {
+          if (!old) return old;
+          return old.map((item) =>
+            item.id === id
+              ? { ...item, isFavorite: toggleFlag(item.isFavorite) }
+              : item,
+          );
+        });
+      }
+
+      return { previousNote, previousNotes };
+    },
+    onError: (error, id, context) => {
+      if (context?.previousNote) {
+        queryClient.setQueryData(noteKey(id), context.previousNote);
+      }
+      if (context?.previousNotes) {
+        queryClient.setQueryData(notesKey, context.previousNotes);
+      }
+      showError(
+        error instanceof Error
+          ? error.message
+          : i18next.t("toast.favorite_failed"),
+      );
+    },
+    onSuccess: (data) => {
+      if (data) {
+        queryClient.setQueryData<Note>(noteKey(data.id), data);
+        queryClient.setQueryData<Note[]>(notesKey, (old) => {
+          if (!old) return old;
+          return old.map((item) => (item.id === data.id ? data : item));
+        });
+      }
+
+      const messageKey = data?.isFavorite
+        ? "toast.favorite_added"
+        : "toast.favorite_removed";
+      showSuccess(i18next.t(messageKey));
+    },
+    onSettled: (data) => {
+      if (data?.id) {
+        queryClient.invalidateQueries({ queryKey: noteKey(data.id) });
+      }
+      queryClient.invalidateQueries({ queryKey: notesKey });
     },
   });
 
@@ -69,5 +148,8 @@ export const useNotes = () => {
 
     deleteNote: deleteNoteMutation.mutate,
     isDeleting: deleteNoteMutation.isPending,
+
+    toggleFavorite: toggleFavoriteMutation.mutate,
+    isTogglingFavorite: toggleFavoriteMutation.isPending,
   };
 };

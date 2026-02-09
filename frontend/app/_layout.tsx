@@ -6,48 +6,88 @@ import {
   useRouter,
   useSegments,
 } from "expo-router";
+import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
-import { PaperProvider } from "react-native-paper";
+import { MD3DarkTheme, MD3LightTheme, PaperProvider } from "react-native-paper";
+import { GlobalSnackbar } from "../components/common";
+import { useThemeMode } from "../hooks/useThemeMode";
 import "../i18n"; // 初始化国际化配置
-import { initDatabase } from "../services/database";
+import { authEventEmitter } from "../services/api";
+import { clearLocalNotes, initDatabase } from "../services/database";
 import { useAuthStore } from "../store/useAuthStore";
 
 // 创建 React Query 客户端实例
 const queryClient = new QueryClient();
 
 export default function RootLayout() {
-  const { isAuthenticated, isRestoring, loadAuth } = useAuthStore();
+  const { isAuthenticated, isRestoring, loadAuth, clearAuth } = useAuthStore();
   const segments = useSegments() as string[];
   const router = useRouter();
   const navigationState = useRootNavigationState();
 
-  // App 启动时初始化数据库 和 恢复用户登录状态
+  // 全局主题模式（MVP）：使用 Paper 内置 MD3 Light/Dark
+  const { isDark } = useThemeMode();
+  const paperTheme = isDark ? MD3DarkTheme : MD3LightTheme;
+
+  // ========================================
+  // App 启动初始化
+  // ========================================
   useEffect(() => {
     initDatabase();
-    loadAuth(); // <--- 关键：恢复状态
+    loadAuth(); // 恢复认证状态
   }, [loadAuth]);
 
-  // 路由守卫：监听认证状态
+  // ========================================
+  // 监听认证过期事件（全局级别）
+  // 当 Token 刷新失败时，自动清理状态并跳转登录页
+  // ========================================
   useEffect(() => {
-    // 0. 确保导航树已挂载且身份恢复完成，否则不执行跳转逻辑
+    const handleAuthExpired = () => {
+      console.log(
+        "[RootLayout] Auth expired, clearing state and redirecting...",
+      );
+
+      // 关键：认证失效时清理账号绑定缓存，避免仍能看到旧账号笔记
+      queryClient.removeQueries({ queryKey: ["notes"] });
+      queryClient.removeQueries({ queryKey: ["note"] });
+      clearLocalNotes().catch(() => {
+        // ignore
+      });
+
+      clearAuth();
+      // 确保导航器已准备好再跳转
+      if (navigationState?.key) {
+        router.replace("/login" as Href);
+      }
+    };
+
+    authEventEmitter.on("AUTH_EXPIRED", handleAuthExpired);
+    return () => {
+      authEventEmitter.off("AUTH_EXPIRED", handleAuthExpired);
+    };
+  }, [clearAuth, router, navigationState?.key]);
+
+  // ========================================
+  // 路由守卫：监听认证状态变化
+  // ========================================
+  useEffect(() => {
+    // 确保导航树已挂载且身份恢复完成
     if (!navigationState?.key || isRestoring) return;
 
-    // 1. 获取当前所在的分组/页面
-    // 如果 segments 为空，说明是根路径，通常默认为 (tabs) 或 index
     const inAuthGroup = segments[0] === "(tabs)" || segments.length === 0;
 
-    // 2. 如果未登录且试图访问受保护区域 -> 踢回 login
+    // 未登录且试图访问受保护区域 -> 跳转登录页
     if (!isAuthenticated && inAuthGroup) {
       router.replace("/login" as Href);
     }
-    // 3. 如果已登录且在 login 页面 -> 进 (tabs)
+    // 已登录且在登录页 -> 跳转主页
     else if (isAuthenticated && segments[0] === "login") {
       router.replace("/(tabs)" as Href);
     }
   }, [isAuthenticated, segments, navigationState?.key, isRestoring, router]);
 
-  // 如果正在恢复状态，显示启动加载页，避免闪烁
+  // 加载中显示
   if (isRestoring || !navigationState?.key) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
@@ -58,24 +98,36 @@ export default function RootLayout() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <PaperProvider>
-        <Stack>
+      <PaperProvider theme={paperTheme}>
+        {/* 状态栏随主题切换，避免深色模式下图标不清晰 */}
+        <StatusBar style={isDark ? "light" : "dark"} />
+        <Stack
+          // 顶部 Header（例如详情页 note/[id]）跟随主题，避免深色模式下过亮/过暗
+          screenOptions={{
+            headerStyle: { backgroundColor: paperTheme.colors.surface },
+            headerTintColor: paperTheme.colors.onSurface,
+            headerTitleStyle: { color: paperTheme.colors.onSurface },
+            headerShadowVisible: false,
+          }}
+        >
           {/* Tab 导航组 - 主要页面 */}
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           {/* 登录页面 */}
           <Stack.Screen name="login" options={{ headerShown: false }} />
+          {/* 注册页面 */}
+          <Stack.Screen name="register" options={{ headerShown: false }} />
           {/* 笔记详情页面 - 使用动态路由 */}
           <Stack.Screen
             name="note/[id]"
             options={{
               headerShown: true,
-              // 使用 presentation: 'card' 实现从右侧滑入的效果
               presentation: "card",
-              // 允许手势返回
               gestureEnabled: true,
             }}
           />
         </Stack>
+        {/* 全局 Snackbar 组件 - 放在 Stack 外部确保覆盖所有页面 */}
+        <GlobalSnackbar />
       </PaperProvider>
     </QueryClientProvider>
   );
