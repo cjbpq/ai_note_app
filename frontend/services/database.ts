@@ -6,15 +6,16 @@ import { Note } from "../types";
  * 数据库管理服务 (Database Service)
  *
  * 负责 SQLite 的所有底层操作。
- * 我们将使用 server 端生成的 ID (uuid) 作为主键，方便对应。
+ * 使用后端生成的 uuid 作为主键。
  */
 
 let db: SQLite.SQLiteDatabase | null = null;
 
-// 数据库版本号 - 用于迁移
-const DB_VERSION = 2;
+// 数据库版本号 - 每次 schema 变更时递增
+// v2 -> v3: 对齐后端 NoteResponse 全字段
+const DB_VERSION = 3;
 
-// 1. 获取数据库实例
+// 获取数据库实例
 const getDB = async (): Promise<SQLite.SQLiteDatabase> => {
   if (db) {
     return db;
@@ -23,7 +24,7 @@ const getDB = async (): Promise<SQLite.SQLiteDatabase> => {
   return db;
 };
 
-// 2. 初始化数据库表结构
+// 初始化数据库表结构
 export const initDatabase = async () => {
   try {
     const database = await getDB();
@@ -31,27 +32,31 @@ export const initDatabase = async () => {
     // 启用 WAL 模式提高性能
     await database.execAsync(`PRAGMA journal_mode = WAL;`);
 
-    // 检查是否需要迁移：删除旧表并重建
-    // 这是简单粗暴但对新手友好的迁移策略
-    // 生产环境应该使用更精细的迁移方案
+    // 简单迁移策略：删除旧表并重建（本地仅做缓存，数据以服务端为准）
     try {
-      // 尝试删除旧表 (如果存在)
       await database.execAsync(`DROP TABLE IF EXISTS notes;`);
       console.log("📦 Dropped old notes table for migration.");
     } catch {
       // 忽略删除失败
     }
 
-    // 创建新表结构
+    // 创建新表结构，对齐 Note 接口
     await database.execAsync(`
       CREATE TABLE IF NOT EXISTS notes (
         id TEXT PRIMARY KEY NOT NULL,
         title TEXT NOT NULL DEFAULT 'Untitled',
         content TEXT DEFAULT '',
         date TEXT DEFAULT '',
+        updatedAt TEXT DEFAULT '',
         tags TEXT DEFAULT '[]',
         imageUrl TEXT DEFAULT '',
-        categoryId TEXT DEFAULT '',
+        imageFilename TEXT DEFAULT '',
+        imageSize INTEGER DEFAULT 0,
+        category TEXT DEFAULT '',
+        isFavorite INTEGER DEFAULT 0,
+        isArchived INTEGER DEFAULT 0,
+        userId TEXT DEFAULT '',
+        deviceId TEXT DEFAULT '',
         structuredData TEXT DEFAULT '{}',
         isSynced INTEGER DEFAULT 1
       );
@@ -64,20 +69,15 @@ export const initDatabase = async () => {
 };
 
 /**
- * 将 Note 对象转换为 SQLite 存储格式
- *
- * 关键：处理可能缺失的字段，确保不会因为 undefined 导致插入失败
+ * 将 Note 对象转换为 SQLite 参数数组
  */
-const normalizeNoteForDb = (note: Note): (string | number)[] => {
-  // 防御性处理：确保日期字段有值
+const noteToDbRow = (note: Note): (string | number)[] => {
   const safeDate = note.date || new Date().toISOString();
 
-  // 防御性处理：确保 tags 是数组
   let safeTags: string[] = [];
   if (Array.isArray(note.tags)) {
     safeTags = note.tags;
   } else if (typeof note.tags === "string") {
-    // 如果后端返回的是字符串，尝试解析
     try {
       safeTags = JSON.parse(note.tags);
     } catch {
@@ -90,13 +90,43 @@ const normalizeNoteForDb = (note: Note): (string | number)[] => {
     note.title || "Untitled",
     note.content || "",
     safeDate,
+    note.updatedAt || safeDate,
     JSON.stringify(safeTags),
     note.imageUrl || "",
-    note.categoryId || "",
+    note.imageFilename || "",
+    note.imageSize || 0,
+    note.category || "",
+    note.isFavorite ? 1 : 0,
+    note.isArchived ? 1 : 0,
+    note.userId || "",
+    note.deviceId || "",
     JSON.stringify(note.structuredData || {}),
-    1, // isSynced: 默认为已同步
+    1,
   ];
 };
+
+/**
+ * 将 SQLite 行数据转换为 Note 对象
+ */
+const dbRowToNote = (row: any): Note => ({
+  id: row.id,
+  title: row.title,
+  content: row.content,
+  date: row.date,
+  updatedAt: row.updatedAt || undefined,
+  tags: row.tags ? JSON.parse(row.tags) : [],
+  imageUrl: row.imageUrl || undefined,
+  imageFilename: row.imageFilename || undefined,
+  imageSize: row.imageSize || undefined,
+  category: row.category || undefined,
+  isFavorite: row.isFavorite === 1,
+  isArchived: row.isArchived === 1,
+  userId: row.userId || undefined,
+  deviceId: row.deviceId || undefined,
+  structuredData: row.structuredData
+    ? JSON.parse(row.structuredData)
+    : undefined,
+});
 
 /**
  * 批量覆盖/保存笔记 (用于 fetchNotes 下拉刷新)
@@ -106,20 +136,18 @@ export const saveNotesToLocal = async (notes: Note[]) => {
   const database = await getDB();
 
   try {
-    // 简单策略：清空旧表 -> 写入新数据 (适合数据量不大的场景)
-    // 进阶策略是做 Diff，但对新手来说，清空重写最稳健
     await database.runAsync("DELETE FROM notes");
 
     if (notes.length === 0) return;
 
-    // 批量插入
     for (const note of notes) {
       await database.runAsync(
         `INSERT OR REPLACE INTO notes 
-        (id, title, content, date, tags, imageUrl, categoryId, structuredData, isSynced) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        // @ts-ignore
-        normalizeNoteForDb(note),
+        (id, title, content, date, updatedAt, tags, imageUrl, imageFilename, imageSize,
+         category, isFavorite, isArchived, userId, deviceId, structuredData, isSynced)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        // @ts-ignore SQLite 参数限制
+        noteToDbRow(note),
       );
     }
   } catch (error) {
@@ -134,10 +162,11 @@ export const saveNoteLocally = async (note: Note) => {
   const database = await getDB();
   await database.runAsync(
     `INSERT OR REPLACE INTO notes 
-    (id, title, content, date, tags, imageUrl, categoryId, structuredData, isSynced) 
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    // @ts-ignore
-    normalizeNoteForDb(note),
+    (id, title, content, date, updatedAt, tags, imageUrl, imageFilename, imageSize,
+     category, isFavorite, isArchived, userId, deviceId, structuredData, isSynced)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    // @ts-ignore SQLite 参数限制
+    noteToDbRow(note),
   );
 };
 
@@ -158,16 +187,36 @@ export const fetchLocalNotes = async (): Promise<Note[]> => {
     "SELECT * FROM notes ORDER BY date DESC",
   );
 
-  return allRows.map((row: any) => ({
-    id: row.id,
-    title: row.title,
-    content: row.content,
-    date: row.date,
-    tags: row.tags ? JSON.parse(row.tags) : [],
-    imageUrl: row.imageUrl,
-    categoryId: row.categoryId,
-    structuredData: row.structuredData
-      ? JSON.parse(row.structuredData)
-      : undefined,
-  }));
+  return allRows.map((row: any) => dbRowToNote(row));
+};
+
+/**
+ * 获取单条本地笔记
+ */
+export const fetchLocalNoteById = async (id: string): Promise<Note | null> => {
+  const database = await getDB();
+  const rows = await database.getAllAsync(
+    "SELECT * FROM notes WHERE id = ? LIMIT 1",
+    [id],
+  );
+
+  const row = rows?.[0] as any;
+  if (!row) return null;
+  return dbRowToNote(row);
+};
+
+/**
+ * 清空本地笔记缓存
+ *
+ * 说明：本地 SQLite 仅作为临时缓存（Source of Truth 仍是后端）。
+ * 在切换账号 / 退出登录时清空，避免不同账号数据串号。
+ */
+export const clearLocalNotes = async (): Promise<void> => {
+  try {
+    const database = await getDB();
+    await database.runAsync("DELETE FROM notes");
+  } catch (error) {
+    // 防御性：DB 尚未初始化或表不存在时，直接忽略即可
+    console.warn("[Database] Failed to clear local notes:", error);
+  }
 };

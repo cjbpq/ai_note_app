@@ -1,14 +1,18 @@
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-from datetime import datetime
 
-class UploadResponse(BaseModel):
-    id: str
+from app.utils.datetime_fmt import LocalDatetime
+
+class UploadFileInfo(BaseModel):
     filename: str
     file_url: str
     file_size: int
     content_type: str
-    upload_time: datetime
+
+class UploadResponse(BaseModel):
+    id: str
+    files: List[UploadFileInfo]
+    upload_time: LocalDatetime
     progress_url: Optional[str] = None
 
 class OCRResult(BaseModel):

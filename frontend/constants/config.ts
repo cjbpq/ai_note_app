@@ -53,6 +53,19 @@ export const APP_CONFIG = {
   IMAGE: {
     MAX_SIZE_MB: 10,
     ALLOWED_TYPES: ["image/jpeg", "image/png"],
+
+    // ── Picker / 相机参数 ──────────────────────────────
+    // quality: 0~1，越高图片越清晰但文件越大，影响上传速度
+    // 0.8 是清晰度与体积的平衡点；校园网较慢时可降至 0.6
+    PICKER_QUALITY: 0.8,
+
+    // 是否允许用户在选图/拍照后进入系统裁剪界面
+    // 注意：Android 系统裁剪体验一般，后续可能替换为自定义方案
+    PICKER_ALLOWS_EDITING: true,
+
+    // 裁剪框宽高比 [宽, 高]，仅在 PICKER_ALLOWS_EDITING=true 时生效
+    // [4,3] 适合横向笔记；如需竖向 A4 纸可改为 [3,4]
+    PICKER_ASPECT: [4, 3] as [number, number],
   },
 
   // UI 交互相关
@@ -71,11 +84,14 @@ export const ENDPOINTS = {
   AUTH: {
     LOGIN: "/auth/login",
     REGISTER: "/auth/register",
+    REFRESH: "/auth/refresh", // Token 刷新接口
+    ME: "/auth/me", // 获取当前用户信息
   },
   LIBRARY: {
     UPLOAD_IMAGE: "/library/notes/from-image",
     GET_NOTE: "/library/notes",
     GET_CATEGORIES: "/library/categories",
+    TOGGLE_FAVORITE: (id: string) => `/library/notes/${id}/favorite`,
   },
   UPLOAD: {
     GET_JOB: "/upload/jobs",
@@ -87,6 +103,9 @@ export const ENDPOINTS = {
  */
 export const STORAGE_KEYS = {
   AUTH_TOKEN: "auth_token",
+  AUTH_USER: "auth_user", // 用户信息持久化
   USER_INFO: "user_info",
   NOTES_CACHE: "notes_cache",
+  TOKEN_EXPIRES_AT: "token_expires_at", // Token 过期时间
+  UI_THEME_MODE: "ui_theme_mode", // 主题模式（浅色/深色/跟随系统）
 } as const;

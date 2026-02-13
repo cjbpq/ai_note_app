@@ -1,10 +1,38 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { ENDPOINTS, STORAGE_KEYS } from "../constants/config";
+import { AxiosError } from "axios";
+import { ENDPOINTS } from "../constants/config";
 import i18next from "../i18n";
-import { AuthForm, LoginResponse } from "../types";
+import { AuthForm, LoginResponse, TokenRefreshResponse, User } from "../types";
 import api from "./api";
+import { tokenService } from "./tokenService";
 
 const USE_MOCK = process.env.EXPO_PUBLIC_USE_MOCK === "true";
+
+/** 提取后端错误信息，优先使用 422 detail.msg，避免 UI 处理 axios 细节 */
+const extractApiErrorMessage = (
+  error: unknown,
+  fallbackKey: string,
+): string => {
+  if (error instanceof AxiosError) {
+    const data = error.response?.data as any;
+    if (Array.isArray(data?.detail) && data.detail.length > 0) {
+      const first = data.detail[0];
+      const msg = first?.msg as string | undefined;
+      const loc = Array.isArray(first?.loc) ? first.loc.join(".") : undefined;
+      if (msg) {
+        return loc ? `${loc}: ${msg}` : msg;
+      }
+    }
+    if (typeof data?.message === "string") {
+      return data.message;
+    }
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return i18next.t(fallbackKey);
+};
 
 export const authService = {
   /**
@@ -24,34 +52,73 @@ export const authService = {
         throw new Error(i18next.t("service.auth_missing_fields"));
       }
 
+      const mockUser: User = {
+        id: "user-123",
+        username: form.username,
+        email: "mock@example.com",
+        avatar: "https://i.pravatar.cc/150?u=" + form.username,
+      };
+      const mockToken = "mock-jwt-token-" + Date.now();
+
+      // 使用 tokenService 保存认证数据
+      await tokenService.saveToken(mockToken);
+      await tokenService.saveUser(mockUser);
+
+      return { token: mockToken, user: mockUser };
+    }
+
+    // 真实 API 调用
+    try {
+      const response = await api.post<{
+        access_token: string;
+        token_type: string;
+        expires_in?: number;
+        expires_at?: string;
+      }>(ENDPOINTS.AUTH.LOGIN, form);
+
+      // 后端返回 { access_token, token_type }，需要提取 Token
+      const accessToken =
+        (response as any).access_token || (response as any).token;
+
+      if (!accessToken) {
+        throw new Error("Login response missing token");
+      }
+
+      // 使用 tokenService 保存 Token
+      await tokenService.saveToken(accessToken, (response as any).expires_at);
+      console.log(
+        "[AuthService] Token saved:",
+        accessToken.substring(0, 10) + "...",
+      );
+
+      // 获取用户信息（如果登录接口不返回用户信息，需要单独调用 /auth/me）
+      const user = await authService.getCurrentUser();
+      await tokenService.saveUser(user);
+
+      return { token: accessToken, user };
+    } catch (error) {
+      throw new Error(extractApiErrorMessage(error, "auth.login_failed"));
+    }
+  },
+
+  /**
+   * 获取当前用户信息
+   * 需要已登录状态（Token 有效）
+   */
+  getCurrentUser: async (): Promise<User> => {
+    if (USE_MOCK) {
+      const savedUser = await tokenService.getUser<User>();
+      if (savedUser) return savedUser;
+
       return {
-        token: "mock-jwt-token-" + Date.now(),
-        user: {
-          id: "user-123",
-          username: form.username,
-          email: "mock@example.com",
-          avatar: "https://i.pravatar.cc/150?u=" + form.username,
-        },
+        id: "user-123",
+        username: "mockuser",
+        email: "mock@example.com",
       };
     }
 
-    const response = await api.post<LoginResponse>(ENDPOINTS.AUTH.LOGIN, form);
-
-    // 自动保存 Token 到本地存储
-    if (response) {
-      // 注意：这里需要根据后端实际返回字段调整。
-      // 假设返回结构是 { access_token: "...", token_type: "bearer" }
-      // 需要将其映射到我们定义的 User 类型或单纯存储 Token
-      const token = (response as any).access_token || (response as any).token;
-      if (token) {
-        await AsyncStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, token);
-        console.log("Token saved to storage:", token.substring(0, 10) + "...");
-      } else {
-        console.warn("Login response did not contain a token:", response);
-      }
-    }
-
-    return response as unknown as LoginResponse;
+    const response = await api.get<User>(ENDPOINTS.AUTH.ME);
+    return response as unknown as User;
   },
 
   /**
@@ -71,25 +138,71 @@ export const authService = {
       };
     }
 
-    const response = await api.post<{ message: string; user_id: string }>(
-      ENDPOINTS.AUTH.REGISTER,
-      form,
+    try {
+      const response = await api.post<{ message: string; user_id: string }>(
+        ENDPOINTS.AUTH.REGISTER,
+        form,
+      );
+      return response as unknown as { message: string; user_id: string };
+    } catch (error) {
+      throw new Error(extractApiErrorMessage(error, "auth.register_failed"));
+    }
+  },
+
+  /**
+   * 刷新 Token
+   * 使用当前有效 Token 获取新 Token
+   * 注意：通常由 API 拦截器自动调用，无需手动调用
+   */
+  refreshToken: async (): Promise<TokenRefreshResponse> => {
+    if (USE_MOCK) {
+      console.log("[Mock API] refresh token called");
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      const newToken = "mock-refreshed-token-" + Date.now();
+      const expiresAt = new Date(
+        Date.now() + 7 * 24 * 60 * 60 * 1000,
+      ).toISOString();
+
+      await tokenService.saveToken(newToken, expiresAt);
+
+      return {
+        access_token: newToken,
+        token_type: "bearer",
+        expires_in: 604800,
+        expires_at: expiresAt,
+      };
+    }
+
+    const response = await api.post<TokenRefreshResponse>(
+      ENDPOINTS.AUTH.REFRESH,
     );
-    return response as unknown as { message: string; user_id: string };
+    const data = response as unknown as TokenRefreshResponse;
+
+    // 保存新 Token
+    await tokenService.saveToken(data.access_token, data.expires_at);
+
+    return data;
   },
 
   /**
    * 退出登录
-   * 清除本地存储的 Token
+   * 清除所有本地认证数据
    */
   logout: async (): Promise<void> => {
     if (USE_MOCK) {
       console.log("[Mock API] logout called");
     }
-    try {
-      await AsyncStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
-    } catch (error) {
-      console.error("Logout failed:", error);
-    }
+    // 统一通过 tokenService 清理所有认证数据
+    await tokenService.clearAll();
+  },
+
+  /**
+   * 检查是否已登录
+   * 仅检查本地 Token 是否存在
+   */
+  isLoggedIn: async (): Promise<boolean> => {
+    const token = await tokenService.getToken();
+    return !!token;
   },
 };

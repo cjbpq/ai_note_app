@@ -113,8 +113,7 @@ export default function LoginScreen() {
         <Button
           mode="text"
           onPress={() => {
-            // TODO: 跳转到注册页，由于目前未实现注册页，暂不处理或打印日志
-            console.log("Navigate to Register");
+            router.push("/register");
           }}
           style={styles.textButton}
         >

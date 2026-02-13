@@ -25,14 +25,14 @@ from app.services.note_service import NoteService
 from app.services.doubao_service import DoubaoServiceError, doubao_service
 from app.services.pipeline_runner import process_note_job
 from app.services.storage_backends import LocalStorageBackend
-from app.services.input_pipeline_service import ALLOWED_EXTENSIONS, MAX_FILE_SIZE
+from app.services.input_pipeline_service import ALLOWED_EXTENSIONS, MAX_FILE_SIZE, MAX_IMAGE_COUNT
 from app.utils.text_cleaning import clean_ocr_text
 
 NOTE_JOB_RESPONSE_EXAMPLE = {
     "job_id": "2c9f6bde-8c93-4b8f-8b62-cc62f0cac8ce",
     "status": "ENQUEUED",
     "detail": "笔记生成任务已进入后台队列",
-    "file_url": "/static/2c9f6bde-8c93-4b8f-8b62-cc62f0cac8ce.png",
+    "file_urls": ["/static/2c9f6bde-8c93-4b8f-8b62-cc62f0cac8ce_0.png"],
     "queued_at": "2024-05-01T11:20:30",
     "progress_url": "/api/v1/upload/jobs/2c9f6bde-8c93-4b8f-8b62-cc62f0cac8ce/stream",
 }
@@ -46,7 +46,7 @@ router = APIRouter()
     status_code=status.HTTP_202_ACCEPTED,
     summary="上传图片并异步生成 AI 笔记",
     description=(
-        "上传图片后立即返回 UploadJob 信息，后台异步调用 Doubao 视觉模型生成结构化笔记并持久化。"
+        "上传一张或多张图片（最多10张）后立即返回 UploadJob 信息，后台异步调用 Doubao 视觉模型生成结构化笔记并持久化。"
         "前端可轮询任务接口以获取最新处理状态。"
     ),
     response_description="后台任务已入队",
@@ -63,36 +63,24 @@ router = APIRouter()
         401: {"description": "用户未授权"},
     500: {"description": "Doubao 服务未配置或调用失败"},
     },
-    dependencies=[Depends(check_doubao_available)],  # 依赖注入: 自动检查 Doubao 服务可用性
+    dependencies=[Depends(check_doubao_available)],
 )
 async def create_note_from_image(
-    background_tasks: BackgroundTasks,  # FastAPI BackgroundTasks 注入
-    file: UploadFile = File(..., description="待识别的图片"),
+    background_tasks: BackgroundTasks,
+    files: List[UploadFile] = File(..., description="待识别的图片（最多10张）"),
     note_type: str = Form("学习笔记", description="笔记分类"),
     tags: Optional[str] = Form(None, description="以逗号分隔的标签"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """上传图片并异步触发笔记生成任务
+    """上传图片并异步触发笔记生成任务（支持多图，最多10张）"""
 
-    改前问题:
-    - 重复的 doubao_service.availability_status() 检查代码 (76-81 行)
-    - 使用 asyncio.create_task() 启动后台任务, 异常会被吞没
-
-    为什么改:
-    1. 依赖注入消除重复: 使用 dependencies=[Depends(check_doubao_available)] 自动检查
-    2. BackgroundTasks 安全: 自动捕获异常并记录日志, 应用关闭时等待任务完成
-
-    学习要点:
-    - dependencies 参数: FastAPI 在请求进入端点前自动执行依赖函数
-    - BackgroundTasks.add_task: 比 asyncio.create_task 更安全, 异常不会丢失
-    - 适用场景: BackgroundTasks 适合请求关联的短期任务 (如发送邮件, 生成报告)
-    """
-    # Doubao 可用性已在依赖注入中检查, 此处无需重复代码
+    if len(files) > MAX_IMAGE_COUNT:
+        raise HTTPException(status_code=400, detail="传入图片请小于或等于10张")
 
     pipeline = InputPipelineService(db)
-    job, storage = pipeline.create_job(
-        file,
+    job, storage_results = pipeline.create_job(
+        files,
         user_id=current_user.id,
         device_id=current_user.id,
         source="library_from_image",
@@ -104,8 +92,6 @@ async def create_note_from_image(
     db.commit()
     db.refresh(job)
 
-    # 改前: asyncio.create_task(...) - 异常被吞没
-    # 改后: background_tasks.add_task(...) - 自动异常处理
     background_tasks.add_task(
         process_note_job,
         job.id,
@@ -119,7 +105,7 @@ async def create_note_from_image(
         job_id=job.id,
         status="ENQUEUED",
         detail="笔记生成任务已进入后台队列",
-        file_url=storage.url,
+        file_urls=[sr.url for sr in storage_results],
         queued_at=job.updated_at,
         progress_url=f"/api/v1/upload/jobs/{job.id}/stream",
     )
@@ -130,40 +116,24 @@ async def create_note_from_image(
     response_model=TextExtractionResponse,
     summary="上传图片并整理文字",
     description=(
-        "上传包含文字的图片，同步调用 Doubao 视觉模型，按照原排版输出 Markdown 或纯文本。"
+        "上传一张或多张包含文字的图片（最多10张），同步调用 Doubao 视觉模型，按照原排版输出 Markdown 或纯文本。"
         "该接口不会创建笔记，仅返回整理后的文本内容。"
     ),
     response_description="整理后的文本内容",
-    dependencies=[Depends(check_doubao_available)],  # 依赖注入: 自动检查 Doubao 服务可用性
+    dependencies=[Depends(check_doubao_available)],
 )
 async def extract_text_from_image(
-    file: UploadFile = File(..., description="待识别的图片"),
+    files: List[UploadFile] = File(..., description="待识别的图片（最多10张）"),
     output_format: str = Form("markdown", description="输出格式：markdown 或 plain_text"),
     detail: Optional[str] = Form(None, description="图像解析细节层级，可选 high/low/auto"),
     current_user: User = Depends(get_current_user),
 ):
-    # Doubao 可用性已在依赖注入中检查, 删除重复的 133-138 行代码
+    if len(files) > MAX_IMAGE_COUNT:
+        raise HTTPException(status_code=400, detail="传入图片请小于或等于10张")
 
     normalized_format = output_format.strip().lower()
     if normalized_format not in {"markdown", "plain_text"}:
         raise HTTPException(status_code=400, detail="output_format 仅支持 markdown 或 plain_text")
-
-    filename = file.filename or "uploaded.png"
-    extension = os.path.splitext(filename)[1].lower()
-    if extension not in ALLOWED_EXTENSIONS:
-        # 尝试根据 content-type 补充扩展名
-        guessed_ext = mimetypes.guess_extension(file.content_type or "")
-        if guessed_ext and guessed_ext.lower() in ALLOWED_EXTENSIONS:
-            extension = guessed_ext.lower()
-        else:
-            raise HTTPException(status_code=400, detail=f"不支持的文件类型: {extension or '未知'}")
-
-    file_bytes = await file.read()
-    if not file_bytes:
-        raise HTTPException(status_code=400, detail="上传文件为空")
-
-    if len(file_bytes) > MAX_FILE_SIZE:
-        raise HTTPException(status_code=400, detail="文件大小超出限制 (10MB)")
 
     detail_value: Optional[str] = None
     if detail:
@@ -173,16 +143,38 @@ async def extract_text_from_image(
         detail_value = normalized_detail
 
     storage = LocalStorageBackend()
-    stored = storage.store_bytes(
-        file_bytes,
-        filename=f"{uuid.uuid4()}{extension}",
-        content_type=file.content_type,
-    )
+    stored_paths = []
+    stored_urls = []
+
+    for file in files:
+        filename = file.filename or "uploaded.png"
+        extension = os.path.splitext(filename)[1].lower()
+        if extension not in ALLOWED_EXTENSIONS:
+            guessed_ext = mimetypes.guess_extension(file.content_type or "")
+            if guessed_ext and guessed_ext.lower() in ALLOWED_EXTENSIONS:
+                extension = guessed_ext.lower()
+            else:
+                raise HTTPException(status_code=400, detail=f"不支持的文件类型: {extension or '未知'}")
+
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise HTTPException(status_code=400, detail=f"上传文件为空: {filename}")
+
+        if len(file_bytes) > MAX_FILE_SIZE:
+            raise HTTPException(status_code=400, detail=f"文件大小超出限制 (10MB): {filename}")
+
+        stored = storage.store_bytes(
+            file_bytes,
+            filename=f"{uuid.uuid4()}{extension}",
+            content_type=file.content_type,
+        )
+        stored_paths.append(stored.path)
+        stored_urls.append(stored.url)
 
     try:
         result = await asyncio.to_thread(
             doubao_service.generate_plain_text,
-            [stored.path],
+            stored_paths,
             detail=detail_value,
             output_format=normalized_format,
         )
@@ -198,7 +190,7 @@ async def extract_text_from_image(
         text=text_output,
         cleaned_text=cleaned or None,
         format=result.get("format", normalized_format),
-        file_url=stored.url,
+        file_urls=stored_urls,
         response=result.get("response"),
     )
 

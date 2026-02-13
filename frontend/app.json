@@ -1,17 +1,23 @@
 {
   "expo": {
-    "name": "my-mobile-app",
-    "slug": "my-mobile-app",
+    "name": "SnapNote邮雁智记",
+    "slug": "snap-note",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "mymobileapp",
+    "scheme": "snapnote",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "bundleIdentifier": "com.cjbghy.smartnote",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "此应用需要使用相机拍摄笔记照片，以便进行文字识别和智能分析。Camera access is required to capture note photos for text recognition.",
+        "NSPhotoLibraryUsageDescription": "此应用需要访问您的相册，以便选取笔记照片进行文字识别。Photo library access is required to select note images for text recognition."
+      }
     },
     "android": {
+      "package": "com.cjbghy.smartnote",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -19,7 +25,13 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "output": "static",
@@ -40,11 +52,32 @@
         }
       ],
       "expo-localization",
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "此应用需要使用相机拍摄笔记照片，以便进行文字识别和智能分析。Camera access is required to capture note photos for text recognition.",
+          "photosPermission": "此应用需要访问您的相册，以便选取笔记照片进行文字识别。Photo library access is required to select note images for text recognition."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "9cb48837-0572-4d3e-ad88-dce413bbb842"
+      }
     }
   }
 }

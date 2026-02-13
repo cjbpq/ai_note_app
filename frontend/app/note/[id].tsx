@@ -1,182 +1,110 @@
 /**
  * 笔记详情页面
- * 使用动态路由 [id] 获取笔记 ID，展示完整的笔记内容
- * 支持 Markdown 渲染和编辑功能
+ *
+ * 功能：
+ * 1. 展示笔记详情（图片、元信息、正文内容）
+ * 2. 支持编辑模式（标题、标签、内容）
+ * 3. 支持删除笔记
+ *
+ * 架构说明：
+ * - UI 层只负责组装子组件和处理导航
+ * - 编辑状态通过 useNoteEditStore 管理
+ * - 数据获取通过 useNotes Hook
  */
 import { Ionicons } from "@expo/vector-icons";
-import { Image } from "expo-image";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   Alert,
-  Dimensions,
-  Keyboard,
   ScrollView,
   StyleSheet,
   View,
 } from "react-native";
-import Markdown from "react-native-markdown-display";
+import { Button, IconButton, Text, useTheme } from "react-native-paper";
+
+// ===== 组件导入 =====
 import {
-  Button,
-  Chip,
-  Divider,
-  IconButton,
-  Surface,
-  Text,
-  TextInput,
-  useTheme,
-} from "react-native-paper";
+  NoteContent,
+  NoteEditForm,
+  NoteImage,
+  NoteKeyPoints,
+  NoteMetaInfo,
+  NoteOriginalText,
+  NoteSections,
+  NoteStudyAdvice,
+  NoteSummaryCard,
+  NoteWarnings,
+} from "../../components/note";
+
+// ===== Hooks & Store =====
 import { useNotes } from "../../hooks/useNotes";
+import { useToast } from "../../hooks/useToast";
+import { useNoteEditStore } from "../../store/useNoteEditStore";
 
-// 获取屏幕宽度，用于图片自适应
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
-// 图片容器的水平内边距
-const IMAGE_HORIZONTAL_PADDING = 32;
-// 计算图片最大宽度
-const IMAGE_MAX_WIDTH = SCREEN_WIDTH - IMAGE_HORIZONTAL_PADDING;
-
+/**
+ * 笔记详情页面组件
+ */
 export default function NoteDetailScreen() {
   const { t } = useTranslation();
   const theme = useTheme();
   const router = useRouter();
+  const { showSuccess, showError } = useToast();
 
-  // 从路由参数中获取笔记 ID
+  // ===== 路由参数 =====
   const { id } = useLocalSearchParams<{ id: string }>();
 
-  // 使用 Hook 获取单条笔记数据和操作方法
-  const { useNote, deleteNote, isDeleting, updateNote, isUpdating } =
-    useNotes();
+  // ===== 数据层 Hook =====
+  const {
+    useNote,
+    deleteNote,
+    isDeleting,
+    updateNote,
+    isUpdating,
+    toggleFavorite,
+    isTogglingFavorite,
+  } = useNotes();
   const { data: note, isLoading, isError, refetch } = useNote(id ?? null);
 
-  // ========== 编辑模式状态 ==========
-  const [isEditing, setIsEditing] = useState(false);
-  const [editTitle, setEditTitle] = useState("");
-  const [editContent, setEditContent] = useState("");
-  const [editTags, setEditTags] = useState("");
+  // ===== 编辑状态 Store =====
+  const {
+    isEditing,
+    startEditing,
+    cancelEditing,
+    finishEditing,
+    saveDraftAndClear,
+    checkDraft,
+    restoreFromDraft,
+    clearDraft,
+    getTagsArray,
+    formData,
+  } = useNoteEditStore();
 
-  // 图片加载状态
-  const [imageLoading, setImageLoading] = useState(true);
-  const [imageError, setImageError] = useState(false);
-
-  // 当笔记数据加载完成后，初始化编辑表单
+  // ===== 副作用：离开页面时保存草稿 =====
   useEffect(() => {
-    if (note) {
-      setEditTitle(note.title || "");
-      setEditContent(note.content || "");
-      setEditTags(note.tags?.join(", ") || "");
-    }
-  }, [note]);
+    return () => {
+      // 组件卸载时保存草稿（如果有未保存更改）
+      saveDraftAndClear();
+    };
+  }, [saveDraftAndClear]);
 
-  /**
-   * Markdown 渲染样式配置
-   * 使用 theme 颜色确保主题一致性
-   */
-  const markdownStyles = useMemo(
-    () =>
-      StyleSheet.create({
-        body: {
-          color: theme.colors.onSurface,
-          fontSize: 16,
-          lineHeight: 24,
-        },
-        heading1: {
-          color: theme.colors.onSurface,
-          fontSize: 24,
-          fontWeight: "bold",
-          marginBottom: 8,
-          marginTop: 16,
-        },
-        heading2: {
-          color: theme.colors.onSurface,
-          fontSize: 20,
-          fontWeight: "bold",
-          marginBottom: 6,
-          marginTop: 12,
-        },
-        heading3: {
-          color: theme.colors.onSurface,
-          fontSize: 18,
-          fontWeight: "600",
-          marginBottom: 4,
-          marginTop: 10,
-        },
-        paragraph: {
-          marginBottom: 10,
-        },
-        code_inline: {
-          backgroundColor: theme.colors.surfaceVariant,
-          color: theme.colors.primary,
-          paddingHorizontal: 4,
-          paddingVertical: 2,
-          borderRadius: 4,
-          fontFamily: "monospace",
-        },
-        code_block: {
-          backgroundColor: theme.colors.surfaceVariant,
-          color: theme.colors.onSurfaceVariant,
-          padding: 12,
-          borderRadius: 8,
-          fontFamily: "monospace",
-          fontSize: 14,
-        },
-        fence: {
-          backgroundColor: theme.colors.surfaceVariant,
-          color: theme.colors.onSurfaceVariant,
-          padding: 12,
-          borderRadius: 8,
-          fontFamily: "monospace",
-          fontSize: 14,
-        },
-        blockquote: {
-          backgroundColor: theme.colors.surfaceVariant,
-          borderLeftColor: theme.colors.primary,
-          borderLeftWidth: 4,
-          paddingLeft: 12,
-          paddingVertical: 8,
-          marginVertical: 8,
-        },
-        list_item: {
-          marginBottom: 4,
-        },
-        bullet_list: {
-          marginBottom: 10,
-        },
-        ordered_list: {
-          marginBottom: 10,
-        },
-        link: {
-          color: theme.colors.primary,
-        },
-        strong: {
-          fontWeight: "bold",
-        },
-        em: {
-          fontStyle: "italic",
-        },
-      }),
-    [theme],
-  );
-
-  /**
-   * 处理返回操作
-   */
+  // ===== 事件处理：返回 =====
   const handleBack = useCallback(() => {
     if (isEditing) {
-      // 如果正在编辑，询问是否放弃更改
+      // 编辑中返回，询问是否放弃更改
       Alert.alert(t("noteDetail.cancel_edit"), "", [
         { text: t("common.cancel"), style: "cancel" },
         {
           text: t("noteDetail.cancel_edit"),
           style: "destructive",
           onPress: () => {
-            setIsEditing(false);
-            // 重置表单数据
             if (note) {
-              setEditTitle(note.title || "");
-              setEditContent(note.content || "");
-              setEditTags(note.tags?.join(", ") || "");
+              cancelEditing({
+                title: note.title || "",
+                content: note.content || "",
+                tags: note.tags?.join(", ") || "",
+              });
             }
           },
         },
@@ -184,86 +112,115 @@ export default function NoteDetailScreen() {
     } else {
       router.back();
     }
-  }, [isEditing, note, router, t]);
+  }, [isEditing, note, cancelEditing, router, t]);
 
-  /**
-   * 进入编辑模式
-   */
-  const handleEdit = useCallback(() => {
-    setIsEditing(true);
-  }, []);
+  // ===== 事件处理：进入编辑模式（含草稿恢复检查） =====
+  const handleEdit = useCallback(async () => {
+    if (!id || !note) return;
 
-  /**
-   * 取消编辑
-   */
-  const handleCancelEdit = useCallback(() => {
-    setIsEditing(false);
-    // 重置表单数据
-    if (note) {
-      setEditTitle(note.title || "");
-      setEditContent(note.content || "");
-      setEditTags(note.tags?.join(", ") || "");
+    // 检查是否有草稿
+    const draft = await checkDraft(id);
+    if (draft) {
+      // 格式化草稿保存时间
+      const savedTime = new Date(draft.savedAt).toLocaleString();
+
+      Alert.alert(
+        t("noteDetail.draft_found_title"),
+        t("noteDetail.draft_found_message", { time: savedTime }),
+        [
+          {
+            text: t("noteDetail.draft_discard"),
+            style: "destructive",
+            onPress: () => {
+              // 放弃草稿，使用当前笔记数据
+              clearDraft(id);
+              startEditing(id, {
+                title: note.title || "",
+                content: note.content || "",
+                tags: note.tags?.join(", ") || "",
+              });
+            },
+          },
+          {
+            text: t("noteDetail.draft_restore"),
+            onPress: () => {
+              // 恢复草稿
+              restoreFromDraft(id, draft);
+            },
+          },
+        ],
+      );
+    } else {
+      // 无草稿，正常进入编辑
+      startEditing(id, {
+        title: note.title || "",
+        content: note.content || "",
+        tags: note.tags?.join(", ") || "",
+      });
     }
-  }, [note]);
+  }, [id, note, checkDraft, clearDraft, startEditing, restoreFromDraft, t]);
 
-  /**
-   * 保存编辑
-   */
+  // ===== 事件处理：取消编辑 =====
+  const handleCancelEdit = useCallback(() => {
+    if (note) {
+      cancelEditing({
+        title: note.title || "",
+        content: note.content || "",
+        tags: note.tags?.join(", ") || "",
+      });
+    }
+  }, [note, cancelEditing]);
+
+  // ===== 事件处理：保存编辑 =====
   const handleSave = useCallback(() => {
     if (!id) return;
-
-    Keyboard.dismiss();
-
-    // 将逗号分隔的标签字符串转为数组
-    const tagsArray = editTags
-      .split(",")
-      .map((tag) => tag.trim())
-      .filter((tag) => tag.length > 0);
 
     updateNote(
       {
         id,
-        title: editTitle,
-        content: editContent,
-        tags: tagsArray,
+        title: formData.title,
+        content: formData.content,
+        tags: getTagsArray(),
       },
       {
         onSuccess: () => {
-          setIsEditing(false);
-          // 刷新数据
+          finishEditing();
           refetch();
-          Alert.alert(t("noteDetail.save_success"));
+          // 使用 Toast 替代 Alert（保存成功不需要强制用户操作）
+          showSuccess(t("toast.save_success"));
         },
         onError: () => {
-          Alert.alert(t("common.error"), t("noteDetail.save_failed"));
+          // 使用 Toast 替代 Alert（保存失败不需要强制用户操作）
+          showError(t("toast.save_failed"));
         },
       },
     );
-  }, [editContent, editTags, editTitle, id, refetch, t, updateNote]);
+  }, [
+    id,
+    formData,
+    getTagsArray,
+    updateNote,
+    finishEditing,
+    refetch,
+    t,
+    showSuccess,
+    showError,
+  ]);
 
-  /**
-   * 处理删除操作
-   * 显示确认弹窗，确认后执行删除并返回列表
-   */
+  // ===== 事件处理：删除笔记 =====
   const handleDelete = useCallback(() => {
     Alert.alert(
       t("noteDetail.delete_confirm_title"),
       t("noteDetail.delete_confirm_message"),
       [
-        {
-          text: t("common.cancel"),
-          style: "cancel",
-        },
+        { text: t("common.cancel"), style: "cancel" },
         {
           text: t("noteDetail.delete_button"),
           style: "destructive",
           onPress: () => {
             if (id) {
               deleteNote(id, {
-                onSuccess: () => {
-                  // 删除成功后返回列表页
-                  router.back();
-                },
+                onSuccess: () => router.back(),
               });
             }
           },
@@ -271,6 +228,12 @@ export default function NoteDetailScreen() {
       ],
     );
   }, [deleteNote, id, router, t]);
+
+  // ===== 事件处理：收藏/取消收藏 =====
+  const handleToggleFavorite = useCallback(() => {
+    if (!id) return;
+    toggleFavorite(id);
+  }, [id, toggleFavorite]);
 
   // ========== 渲染状态处理 ==========
 
@@ -369,6 +332,16 @@ export default function NoteDetailScreen() {
               // 查看模式：显示编辑和删除按钮
               <View style={styles.headerRightContainer}>
                 <IconButton
+                  icon={note.isFavorite ? "heart" : "heart-outline"}
+                  iconColor={
+                    note.isFavorite
+                      ? theme.colors.error
+                      : theme.colors.onSurface
+                  }
+                  onPress={handleToggleFavorite}
+                  disabled={isTogglingFavorite}
+                />
+                <IconButton
                   icon="pencil-outline"
                   iconColor={theme.colors.primary}
                   onPress={handleEdit}
@@ -389,179 +362,48 @@ export default function NoteDetailScreen() {
         contentContainerStyle={styles.contentContainer}
         keyboardShouldPersistTaps="handled"
       >
-        {/* 图片区域 - 如果有图片则显示 */}
-        {note.imageUrl && !imageError && (
-          <Surface style={styles.imageContainer} elevation={1}>
-            {imageLoading && (
-              <View style={styles.imagePlaceholder}>
-                <ActivityIndicator size="small" color={theme.colors.primary} />
-              </View>
-            )}
-            <Image
-              source={{ uri: note.imageUrl }}
-              style={[
-                styles.noteImage,
-                imageLoading && styles.imageHidden, // 加载时隐藏图片
-              ]}
-              contentFit="contain"
-              transition={300}
-              onLoad={() => setImageLoading(false)}
-              onError={() => {
-                setImageLoading(false);
-                setImageError(true);
-              }}
-              accessibilityLabel={t("noteDetail.image_alt")}
-            />
-          </Surface>
-        )}
+        {/* 图片区域 */}
+        <NoteImage imageUrl={note.imageUrl} />
 
-        {/* 图片加载失败的占位提示 */}
-        {note.imageUrl && imageError && (
-          <Surface
-            style={[
-              styles.imageErrorContainer,
-              { backgroundColor: theme.colors.errorContainer },
-            ]}
-            elevation={0}
-          >
-            <Ionicons
-              name="image-outline"
-              size={40}
-              color={theme.colors.onErrorContainer}
-            />
-            <Text
-              variant="bodySmall"
-              style={{ color: theme.colors.onErrorContainer }}
-            >
-              {t("common.error")}
-            </Text>
-          </Surface>
-        )}
-
-        {/* ========== 编辑模式 ========== */}
+        {/* 编辑模式 vs 查看模式 */}
         {isEditing ? (
-          <View style={styles.editContainer}>
-            {/* 标题输入 */}
-            <TextInput
-              label={t("noteDetail.edit_title_placeholder")}
-              value={editTitle}
-              onChangeText={setEditTitle}
-              mode="outlined"
-              style={styles.editInput}
-            />
-
-            {/* 标签输入 */}
-            <TextInput
-              label={t("noteDetail.edit_tags_placeholder")}
-              value={editTags}
-              onChangeText={setEditTags}
-              mode="outlined"
-              style={styles.editInput}
-            />
-
-            {/* 内容输入 */}
-            <TextInput
-              label={t("noteDetail.edit_content_placeholder")}
-              value={editContent}
-              onChangeText={setEditContent}
-              mode="outlined"
-              multiline
-              numberOfLines={15}
-              style={[styles.editInput, styles.contentInput]}
-            />
-
-            {/* 保存按钮 */}
-            <Button
-              mode="contained"
-              onPress={handleSave}
-              loading={isUpdating}
-              disabled={isUpdating}
-              style={styles.saveButton}
-            >
-              {t("noteDetail.save_button")}
-            </Button>
-          </View>
+          <NoteEditForm onSave={handleSave} isSaving={isUpdating} />
         ) : (
-          /* ========== 查看模式 ========== */
           <>
-            {/* 标题区域 */}
-            <Surface style={styles.headerSection} elevation={0}>
-              <Text
-                variant="headlineMedium"
-                style={{ color: theme.colors.onSurface }}
-              >
-                {note.title}
-              </Text>
+            {/* 元信息：日期、标签、学科 */}
+            <NoteMetaInfo
+              date={note.date}
+              tags={note.tags}
+              subject={note.structuredData?.meta?.subject}
+            />
 
-              {/* 创建时间 */}
-              {note.date && (
-                <View style={styles.dateRow}>
-                  <Ionicons
-                    name="time-outline"
-                    size={16}
-                    color={theme.colors.outline}
-                  />
-                  <Text
-                    variant="bodySmall"
-                    style={[styles.dateText, { color: theme.colors.outline }]}
-                  >
-                    {t("noteDetail.created_at")}: {note.date}
-                  </Text>
-                </View>
-              )}
-            </Surface>
+            {/* 结构化内容 vs 纯文本兜底 */}
+            {note.structuredData ? (
+              <>
+                {/* AI 摘要 */}
+                <NoteSummaryCard summary={note.structuredData.summary} />
 
-            <Divider style={styles.divider} />
+                {/* 知识要点 */}
+                <NoteKeyPoints keyPoints={note.structuredData.keyPoints} />
 
-            {/* 标签区域 */}
-            {note.tags && note.tags.length > 0 && (
-              <View style={styles.tagsSection}>
-                <Text
-                  variant="labelMedium"
-                  style={[
-                    styles.sectionLabel,
-                    { color: theme.colors.secondary },
-                  ]}
-                >
-                  {t("noteDetail.tags_label")}
-                </Text>
-                <View style={styles.tagsWrap}>
-                  {note.tags.map((tag) => (
-                    <Chip
-                      key={tag}
-                      style={[
-                        styles.tag,
-                        { backgroundColor: theme.colors.secondaryContainer },
-                      ]}
-                      textStyle={{ color: theme.colors.onSecondaryContainer }}
-                      compact
-                    >
-                      {tag}
-                    </Chip>
-                  ))}
-                </View>
-              </View>
+                {/* 内容章节（可折叠） */}
+                <NoteSections sections={note.structuredData.sections} />
+
+                {/* 学习建议 */}
+                <NoteStudyAdvice
+                  studyAdvice={note.structuredData.studyAdvice}
+                />
+
+                {/* 原始识别文本（折叠查看） */}
+                <NoteOriginalText rawText={note.structuredData.rawText} />
+
+                {/* AI 处理警告 */}
+                <NoteWarnings warnings={note.structuredData.meta?.warnings} />
+              </>
+            ) : (
+              /* 无结构化数据时，使用旧版纯文本渲染 */
+              <NoteContent title={note.title} content={note.content} />
             )}
-
-            {/* 正文内容区域 - 使用 Markdown 渲染 */}
-            <Surface
-              style={[
-                styles.contentSection,
-                { backgroundColor: theme.colors.surfaceVariant },
-              ]}
-              elevation={0}
-            >
-              {note.content ? (
-                <Markdown style={markdownStyles}>{note.content}</Markdown>
-              ) : (
-                <Text
-                  variant="bodyLarge"
-                  style={{ color: theme.colors.onSurfaceVariant }}
-                >
-                  {t("noteDetail.no_content")}
-                </Text>
-              )}
-            </Surface>
           </>
         )}
       </ScrollView>
@@ -570,8 +412,6 @@ export default function NoteDetailScreen() {
 }
 
 // ========== 样式定义 ==========
-// StyleSheet 仅负责布局 (Layout): Margin, Padding, Flex, Size
-// 颜色使用 theme 动态获取
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -595,94 +435,7 @@ const styles = StyleSheet.create({
   backBtn: {
     marginTop: 8,
   },
-  // 图片相关样式
-  imageContainer: {
-    margin: 16,
-    borderRadius: 12,
-    overflow: "hidden",
-    minHeight: 200,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  imagePlaceholder: {
-    position: "absolute",
-    justifyContent: "center",
-    alignItems: "center",
-    width: "100%",
-    height: 200,
-  },
-  noteImage: {
-    width: IMAGE_MAX_WIDTH,
-    height: 300, // 默认高度，contentFit="contain" 会自适应
-  },
-  imageHidden: {
-    opacity: 0,
-  },
-  imageErrorContainer: {
-    margin: 16,
-    borderRadius: 12,
-    padding: 24,
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 100,
-  },
-  // 标题区域样式
-  headerSection: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  dateRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 8,
-  },
-  dateText: {
-    marginLeft: 6,
-  },
-  divider: {
-    marginVertical: 16,
-    marginHorizontal: 16,
-  },
-  // 标签区域样式
-  tagsSection: {
-    paddingHorizontal: 16,
-    marginBottom: 16,
-  },
-  sectionLabel: {
-    marginBottom: 8,
-  },
-  tagsWrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  tag: {
-    marginRight: 4,
-  },
-  // 正文内容样式
-  contentSection: {
-    marginHorizontal: 16,
-    padding: 16,
-    borderRadius: 12,
-  },
-  contentText: {
-    lineHeight: 24,
-  },
-  // 头部右侧按钮容器
   headerRightContainer: {
     flexDirection: "row",
-  },
-  // 编辑模式样式
-  editContainer: {
-    padding: 16,
-  },
-  editInput: {
-    marginBottom: 16,
-  },
-  contentInput: {
-    minHeight: 200,
-  },
-  saveButton: {
-    marginTop: 8,
   },
 });

@@ -1,67 +1,86 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
-import { STORAGE_KEYS } from "../constants/config";
+import { authEventEmitter } from "../services/api";
+import { tokenService } from "../services/tokenService";
 import { User } from "../types";
 
+/**
+ * 认证状态接口
+ *
+ * 设计说明：
+ * - Store 层只管理内存中的认证状态
+ * - Token 的持久化操作统一由 tokenService 处理
+ * - 通过事件监听响应认证过期
+ */
 interface AuthState {
   user: User | null;
-  token: string | null;
   isAuthenticated: boolean;
   isRestoring: boolean;
 
-  setAuth: (user: User, token: string) => void;
+  // Actions
+  setAuth: (user: User) => void;
   clearAuth: () => void;
   loadAuth: () => Promise<void>;
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
-  user: null,
-  token: null,
-  isAuthenticated: false,
-  isRestoring: true,
+export const useAuthStore = create<AuthState>((set) => {
+  // ========================================
+  // 监听认证过期事件
+  // 当 API 层检测到 Token 刷新失败时触发
+  // ========================================
+  authEventEmitter.on("AUTH_EXPIRED", () => {
+    console.log("[AuthStore] Received AUTH_EXPIRED event, clearing state");
+    set({ user: null, isAuthenticated: false });
+  });
 
-  setAuth: async (user, token) => {
-    // 状态更新
-    set({ user, token, isAuthenticated: true });
-    // 持久化存储 (Service层已处理Token，这里为了保险或冗余可以再存储UserInfo，
-    // 但通常Token足矣，或者可以在这里存储User信息以便离线显示)
-    // 简单起见，这里假设 Service 层主要负责 Token，Store 负责内存状态。
-    // 如果需要持久化 User 对象，也可以在这里 setItem
-    try {
-      await AsyncStorage.setItem("auth_user", JSON.stringify(user));
-    } catch (e) {
-      console.warn("Failed to save user info to storage");
-    }
-  },
+  return {
+    user: null,
+    isAuthenticated: false,
+    isRestoring: true,
 
-  clearAuth: async () => {
-    set({ user: null, token: null, isAuthenticated: false });
-    try {
-      await AsyncStorage.removeItem("auth_user");
-      // Token removal is usually handled by Service, but Store clear should also ensure UI consistency
-      // The logout hook will call Service.logout which clears Token from storage.
-    } catch (e) {
-      console.warn("Failed to clear auth info from storage");
-    }
-  },
+    /**
+     * 设置认证状态（登录成功后调用）
+     * 注意：Token 保存由 authService 处理，Store 只更新内存状态
+     */
+    setAuth: (user: User) => {
+      set({ user, isAuthenticated: true });
+      // 异步保存用户信息（不阻塞 UI）
+      tokenService.saveUser(user).catch((e) => {
+        console.warn("[AuthStore] Failed to persist user:", e);
+      });
+    },
 
-  loadAuth: async () => {
-    set({ isRestoring: true });
-    try {
-      const token = await AsyncStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-      const userStr = await AsyncStorage.getItem("auth_user");
+    /**
+     * 清除认证状态（退出登录时调用）
+     * 注意：Token 清理由 authService.logout 统一处理
+     */
+    clearAuth: () => {
+      set({ user: null, isAuthenticated: false });
+    },
 
-      if (token && userStr) {
-        const user = JSON.parse(userStr) as User;
-        set({ token, user, isAuthenticated: true });
-      } else {
-        set({ token: null, user: null, isAuthenticated: false });
+    /**
+     * 恢复认证状态（App 启动时调用）
+     * 从本地存储读取 Token 和用户信息
+     */
+    loadAuth: async () => {
+      set({ isRestoring: true });
+      try {
+        // 从 tokenService 读取
+        const token = await tokenService.getToken();
+        const user = await tokenService.getUser<User>();
+
+        if (token && user) {
+          set({ user, isAuthenticated: true });
+          console.log("[AuthStore] Auth restored for user:", user.username);
+        } else {
+          set({ user: null, isAuthenticated: false });
+          console.log("[AuthStore] No saved auth found");
+        }
+      } catch (e) {
+        console.warn("[AuthStore] Failed to load auth:", e);
+        set({ user: null, isAuthenticated: false });
+      } finally {
+        set({ isRestoring: false });
       }
-    } catch (e) {
-      console.warn("Failed to load auth info");
-      set({ token: null, user: null, isAuthenticated: false });
-    } finally {
-      set({ isRestoring: false });
-    }
-  },
-}));
+    },
+  };
+});

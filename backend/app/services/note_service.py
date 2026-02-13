@@ -18,7 +18,7 @@ class NoteService:
     SUMMARY_FIELDS = [
         Note.id, Note.user_id, Note.device_id,
         Note.title, Note.category, Note.tags,
-        Note.image_url, Note.image_filename, Note.image_size,
+        Note.image_urls, Note.image_filenames, Note.image_sizes,
         Note.is_favorite, Note.is_archived,
         Note.created_at, Note.updated_at,
     ]

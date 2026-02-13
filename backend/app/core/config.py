@@ -39,6 +39,9 @@ class Settings(BaseSettings):
         description="允许的 CORS 源 (逗号分隔). 生产环境应设置为实际前端域名 (如 https://app.example.com)",
     )
 
+    # Timezone (用于 API 返回时间的时区转换，默认中国标准时间)
+    TIMEZONE: str = "Asia/Shanghai"
+
     # Database
     DATABASE_URL: str = "sqlite:///./app.db"
 

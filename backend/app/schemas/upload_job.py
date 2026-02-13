@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.utils.datetime_fmt import LocalDatetime
 
 
 class StorageInfo(BaseModel):
@@ -24,19 +26,25 @@ class FileMeta(BaseModel):
     height: Optional[int] = None
 
 
+class FileMetaList(BaseModel):
+    """多文件上传时的文件元数据列表"""
+    files: List[FileMeta]
+    total_size: int
+
+
 class UploadJobBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
     status: str
     source: Optional[str] = None
-    file_meta: FileMeta
-    storage: StorageInfo
+    file_meta: Union[FileMeta, FileMetaList, Dict[str, Any]]
+    storage: Union[StorageInfo, List[StorageInfo], Dict[str, Any]]
     user_id: Optional[str] = None
     device_id: Optional[str] = None
     note_id: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: LocalDatetime
+    updated_at: LocalDatetime
 
 
 class UploadJobResponse(UploadJobBase):
@@ -47,4 +55,4 @@ class UploadJobResponse(UploadJobBase):
 
 class CreateUploadJobResponse(BaseModel):
     job: UploadJobResponse
-    file_url: Optional[str] = None
+    file_urls: Optional[List[str]] = None

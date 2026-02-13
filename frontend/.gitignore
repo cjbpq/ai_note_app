@@ -101,3 +101,12 @@ app-example
 /ios
 /android
 
+<<<<<<< HEAD
+=======
+# KaTeX offline font temp artifacts (generated during mathAssets build)
+/assets/fonts/KaTeX_*
+/assets/fonts/*.base64
+*.woff.base64
+*.woff2.base64
+*.ttf.base64
+>>>>>>> 8deb5cf9a704b9cc560620a827172173715e4114

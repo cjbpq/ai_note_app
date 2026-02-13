@@ -1,11 +1,12 @@
 ﻿import uuid
 from typing import Any, Dict
 
-from sqlalchemy import Column, String, Boolean, DateTime, Integer, Text, ForeignKey
+from sqlalchemy import Column, String, Boolean, DateTime, Text, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.types import JSON
 
 from app.database import Base
+from app.utils.datetime_fmt import format_local
 
 
 class Note(Base):
@@ -19,9 +20,9 @@ class Note(Base):
     title = Column(String(255), nullable=False)
     category = Column(String(100), nullable=True, default="学习笔记")
     tags = Column(JSON, nullable=False, default=list)
-    image_url = Column(String(2048), nullable=False)
-    image_filename = Column(String(255), nullable=False)
-    image_size = Column(Integer, nullable=False)
+    image_urls = Column(JSON, nullable=False, default=list)
+    image_filenames = Column(JSON, nullable=False, default=list)
+    image_sizes = Column(JSON, nullable=False, default=list)
     original_text = Column(Text, nullable=False)
     structured_data = Column(JSON, nullable=False, default=dict)
     is_favorite = Column(Boolean, nullable=False, default=False)
@@ -41,13 +42,13 @@ class Note(Base):
             "title": self.title,
             "category": self.category,
             "tags": self.tags or [],
-            "image_url": self.image_url,
-            "image_filename": self.image_filename,
-            "image_size": self.image_size,
+            "image_urls": self.image_urls or [],
+            "image_filenames": self.image_filenames or [],
+            "image_sizes": self.image_sizes or [],
             "original_text": self.original_text,
             "structured_data": self.structured_data or {},
             "is_favorite": self.is_favorite,
             "is_archived": self.is_archived,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_at": format_local(self.created_at),
+            "updated_at": format_local(self.updated_at),
         }

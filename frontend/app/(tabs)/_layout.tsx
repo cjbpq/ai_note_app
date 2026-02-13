@@ -3,14 +3,28 @@ import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { useTranslation } from "react-i18next";
+import { useTheme } from "react-native-paper";
 
 export default function TabLayout() {
   const { t } = useTranslation();
+  const theme = useTheme();
+  const outlineVariant = theme.colors.outlineVariant ?? theme.colors.outline;
 
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: "#2f95dc", // 选中时的颜色
+        // 使用主题色，避免硬编码（为后续深色模式做准备）
+        tabBarActiveTintColor: theme.colors.primary,
+        tabBarInactiveTintColor: theme.colors.onSurfaceVariant,
+        // TabBar 背景/边框跟随主题，深色模式下不会刺眼
+        tabBarStyle: {
+          backgroundColor: theme.colors.surface,
+          borderTopColor: outlineVariant,
+        },
+        // 即使未来某些 Tab 打开 header，也确保 header 颜色跟随主题
+        headerStyle: { backgroundColor: theme.colors.surface },
+        headerTintColor: theme.colors.onSurface,
+        headerTitleStyle: { color: theme.colors.onSurface },
         headerShown: true, // 显示当前页面的标题栏
       }}
     >
@@ -19,6 +33,8 @@ export default function TabLayout() {
         name="index"
         options={{
           title: t("tab.home"),
+          // MVP：页面内自行管理顶部区域，不使用顶层 Header
+          headerShown: false,
           tabBarIcon: ({ color }) => (
             <Ionicons name="camera-outline" size={28} color={color} />
           ),
@@ -29,6 +45,8 @@ export default function TabLayout() {
         name="read"
         options={{
           title: t("tab.read"),
+          // MVP：阅读页使用页面内 Appbar（预留搜索入口），不使用顶层 Header
+          headerShown: false,
           tabBarIcon: ({ color }) => (
             <Ionicons name="documents-outline" size={24} color={color} />
           ),
@@ -42,6 +60,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => (
             <Ionicons name="settings" size={24} color={color} />
           ),
+          headerShown: false,
         }}
       />
     </Tabs>
