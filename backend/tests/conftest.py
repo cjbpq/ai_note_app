@@ -11,6 +11,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from fastapi.testclient import TestClient
 
+# Keep tests self-contained even when runtime defaults use PostgreSQL.
+os.environ.setdefault("SECRET_KEY", "test-secret-key-with-sufficient-length-32-bytes-minimum-requirement")
+os.environ.setdefault("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173")
+os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
+
 from app.database import Base
 from app.main import app
 from app.core.config import settings
@@ -172,4 +177,4 @@ def setup_test_env():
     """
     os.environ["SECRET_KEY"] = "test-secret-key-with-sufficient-length-32-bytes-minimum-requirement"
     os.environ["ALLOWED_ORIGINS"] = "http://localhost:3000,http://localhost:5173"
-    os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+    os.environ["DATABASE_URL"] = "sqlite:///./test.db"

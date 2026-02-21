@@ -43,7 +43,8 @@ class Settings(BaseSettings):
     TIMEZONE: str = "Asia/Shanghai"
 
     # Database
-    DATABASE_URL: str = "sqlite:///./app.db"
+    DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/ai_note_app"
+    UPLOAD_DIR: str = "uploaded_images"
 
     # Doubao configuration
     USE_DOUBAO_PIPELINE: bool = True

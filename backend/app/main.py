@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 import logging
 import os
+from pathlib import Path
 import sys
 
 from fastapi import FastAPI, Request
@@ -13,7 +14,7 @@ from app.api.v1.api import api_router
 from app.core.config import settings
 from app.core.exceptions import ServiceError
 from app.core.logging_config import setup_logging
-from app.database import Base, engine, ensure_sqlite_schema
+from app.database import Base, engine
 from app import models  # noqa: F401
 
 logger = logging.getLogger(__name__)
@@ -58,7 +59,8 @@ def _patch_uvicorn_stdin_handling() -> None:
 _patch_uvicorn_stdin_handling()
 
 # 确保静态目录存在
-os.makedirs("uploaded_images", exist_ok=True)
+upload_dir = Path(settings.UPLOAD_DIR)
+upload_dir.mkdir(parents=True, exist_ok=True)
 
 app_description = getattr(settings, "APP_DESCRIPTION", settings.APP_NAME)
 
@@ -83,7 +85,6 @@ async def lifespan(app: FastAPI):
     setup_logging()  # 初始化日志系统 (必须在第一步)
     logger.info("应用启动, 初始化数据库...")
     Base.metadata.create_all(bind=engine)
-    ensure_sqlite_schema()
     logger.info("数据库初始化完成")
 
     yield  # 应用运行期间
@@ -114,7 +115,7 @@ app.add_middleware(
     allow_headers=["*"],  # 允许所有请求头 (或限制为常用头部如 Authorization, Content-Type)
 )
 
-app.mount("/static", StaticFiles(directory="uploaded_images"), name="static")
+app.mount("/static", StaticFiles(directory=str(upload_dir)), name="static")
 
 
 # === 全局异常处理器 ===

@@ -6,10 +6,11 @@ from typing import Optional
 
 from fastapi import HTTPException
 
+from app.core.config import settings
 from .base import StorageBackend, StorageResult
 
-UPLOAD_DIR = Path("uploaded_images")
-UPLOAD_DIR.mkdir(exist_ok=True)
+UPLOAD_DIR = Path(settings.UPLOAD_DIR)
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class LocalStorageBackend(StorageBackend):

@@ -20,12 +20,17 @@ from app.schemas.text import TextExtractionResponse
 from app.services.export_service import ExportService
 from app.core.dependencies import get_current_user, check_doubao_available
 from app.models.user import User
-from app.services.input_pipeline_service import InputPipelineService
 from app.services.note_service import NoteService
 from app.services.doubao_service import DoubaoServiceError, doubao_service
 from app.services.pipeline_runner import process_note_job
 from app.services.storage_backends import LocalStorageBackend
-from app.services.input_pipeline_service import ALLOWED_EXTENSIONS, MAX_FILE_SIZE, MAX_IMAGE_COUNT
+from app.services.input_pipeline_service import (
+    InputPipelineService,
+    ALLOWED_EXTENSIONS,
+    MAX_FILE_SIZE,
+    MAX_IMAGE_COUNT,
+    MAX_CONCURRENT_NOTE_JOBS_PER_USER,
+)
 from app.utils.text_cleaning import clean_ocr_text
 
 NOTE_JOB_RESPONSE_EXAMPLE = {
@@ -38,6 +43,7 @@ NOTE_JOB_RESPONSE_EXAMPLE = {
 }
 
 router = APIRouter()
+NOTE_JOB_SOURCE = "library_from_image"
 
 
 @router.post(
@@ -61,7 +67,8 @@ router = APIRouter()
         },
         400: {"description": "请求参数错误"},
         401: {"description": "用户未授权"},
-    500: {"description": "Doubao 服务未配置或调用失败"},
+        429: {"description": "用户并发任务数超过上限"},
+        500: {"description": "Doubao 服务未配置或调用失败"},
     },
     dependencies=[Depends(check_doubao_available)],
 )
@@ -79,11 +86,18 @@ async def create_note_from_image(
         raise HTTPException(status_code=400, detail="传入图片请小于或等于10张")
 
     pipeline = InputPipelineService(db)
+    active_jobs = pipeline.count_active_jobs(user_id=current_user.id, source=NOTE_JOB_SOURCE)
+    if active_jobs >= MAX_CONCURRENT_NOTE_JOBS_PER_USER:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"当前并发任务已达上限（{MAX_CONCURRENT_NOTE_JOBS_PER_USER}），请等待部分任务完成后再试",
+        )
+
     job, storage_results = pipeline.create_job(
         files,
         user_id=current_user.id,
         device_id=current_user.id,
-        source="library_from_image",
+        source=NOTE_JOB_SOURCE,
     )
 
     tags_list = [tag.strip() for tag in tags.split(",") if tag.strip()] if tags else []

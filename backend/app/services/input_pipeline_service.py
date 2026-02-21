@@ -16,6 +16,8 @@ from app.services.storage_backends import LocalStorageBackend, StorageBackend, S
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff"}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB per file
 MAX_IMAGE_COUNT = 10
+MAX_CONCURRENT_NOTE_JOBS_PER_USER = 10
+TERMINAL_JOB_STATUSES = {"FAILED", "PERSISTED"}
 
 
 class InputPipelineService:
@@ -128,3 +130,12 @@ class InputPipelineService:
         if status_filter:
             query = query.filter(UploadJob.status == status_filter)
         return query.order_by(UploadJob.created_at.desc()).all()
+
+    def count_active_jobs(self, *, user_id: str, source: Optional[str] = None) -> int:
+        query = self.db.query(UploadJob).filter(
+            UploadJob.user_id == user_id,
+            UploadJob.status.notin_(TERMINAL_JOB_STATUSES),
+        )
+        if source:
+            query = query.filter(UploadJob.source == source)
+        return query.count()
