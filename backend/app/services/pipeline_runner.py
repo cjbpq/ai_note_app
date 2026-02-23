@@ -35,8 +35,9 @@ async def process_note_job(
             logger.warning("Upload job %s not found", job_id)
             return
 
-        storage_path = (job.storage or {}).get("path")
-        if not storage_path:
+        storage_data = job.storage or []
+        storage_paths = [s.get("path") for s in storage_data if s.get("path")]
+        if not storage_paths:
             job.append_error({"stage": "DOUBAO", "error": "Missing storage path"})
             _update_status(db, job, "FAILED")
             return
@@ -54,7 +55,7 @@ async def process_note_job(
         try:
             doubao_output = await asyncio.to_thread(
                 doubao_service.generate_structured_note,
-                [storage_path],
+                storage_paths,
                 note_type=note_type,
                 tags=tag_list,
             )
@@ -94,15 +95,17 @@ async def process_note_job(
         job.ai_result = note_payload
         _update_status(db, job, "AI_DONE")
 
+        file_metas = (job.file_meta or {}).get("files", [])
+
         note_service = NoteService(db)
         saved_note = note_service.create_note(
             {
                 "title": note_payload.get("title", "未命名笔记"),
                 "original_text": cleaned_text or raw_text,
                 "structured_data": note_payload,
-                "image_url": (job.storage or {}).get("url"),
-                "image_filename": (job.file_meta or {}).get("original_name", ""),
-                "image_size": (job.file_meta or {}).get("size", 0),
+                "image_urls": [s.get("url", "") for s in storage_data],
+                "image_filenames": [m.get("original_name", "") for m in file_metas],
+                "image_sizes": [m.get("size", 0) for m in file_metas],
                 "category": note_type,
                 "tags": _normalize_tags(tag_list),
             },

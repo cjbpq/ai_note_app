@@ -1,5 +1,6 @@
 import asyncio
 import json
+from typing import List
 
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -7,11 +8,12 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user
 from app.database import get_db, SessionLocal
-from app.models.upload import UploadResponse
+from app.models.upload import UploadResponse, UploadFileInfo
 from app.models.user import User
 from app.schemas.upload_job import UploadJobResponse
-from app.services.input_pipeline_service import InputPipelineService
+from app.services.input_pipeline_service import InputPipelineService, MAX_IMAGE_COUNT
 from app.models.upload_job import UploadJob
+from app.utils.datetime_fmt import format_local
 
 router = APIRouter()
 
@@ -19,10 +21,14 @@ TERMINAL_JOB_STATUSES = {"FAILED", "PERSISTED"}
 
 UPLOAD_SUCCESS_EXAMPLE = {
     "id": "9c6f5f45-0b7d-48f9-90a9-5f9a0bf6dba0",
-    "filename": "lecture-notes.png",
-    "file_url": "/static/9c6f5f45-0b7d-48f9-90a9-5f9a0bf6dba0.png",
-    "file_size": 123456,
-    "content_type": "image/png",
+    "files": [
+        {
+            "filename": "lecture-notes.png",
+            "file_url": "/static/9c6f5f45-0b7d-48f9-90a9-5f9a0bf6dba0_0.png",
+            "file_size": 123456,
+            "content_type": "image/png",
+        }
+    ],
     "upload_time": "2024-05-01T10:15:30",
 }
 
@@ -32,7 +38,7 @@ UPLOAD_SUCCESS_EXAMPLE = {
     response_model=UploadResponse,
     summary="上传图片并创建处理任务",
     description=(
-        "保存原始图片到存储后，创建一个 UploadJob 任务。返回的 job `id` 可用于查询"
+        "上传一张或多张图片（最多10张）到存储后，创建一个 UploadJob 任务。返回的 job `id` 可用于查询"
         " OCR/AI 处理进度以及获取最终笔记。"
     ),
     response_description="上传成功后返回任务和文件相关信息",
@@ -50,29 +56,39 @@ UPLOAD_SUCCESS_EXAMPLE = {
     },
 )
 async def upload_image(
-    file: UploadFile = File(...),
+    files: List[UploadFile] = File(..., description="待上传的图片（最多10张）"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """上传图片文件"""
-    
-    if not file:
+    """上传图片文件（支持多图，最多10张）"""
+
+    if not files:
         raise HTTPException(400, "没有上传文件")
-    
+
+    if len(files) > MAX_IMAGE_COUNT:
+        raise HTTPException(400, "传入图片请小于或等于10张")
+
     pipeline = InputPipelineService(db)
-    job, storage = pipeline.create_job(
-        file,
+    job, storage_results = pipeline.create_job(
+        files,
         user_id=current_user.id,
         device_id=current_user.id,
         source="upload_api",
     )
 
+    file_metas = (job.file_meta or {}).get("files", [])
+
     return UploadResponse(
         id=job.id,
-        filename=job.file_meta["original_name"],
-        file_url=storage.url,
-        file_size=job.file_meta["size"],
-        content_type=job.file_meta["content_type"],
+        files=[
+            UploadFileInfo(
+                filename=file_metas[i]["original_name"] if i < len(file_metas) else "",
+                file_url=sr.url,
+                file_size=sr.size or 0,
+                content_type=sr.content_type or "application/octet-stream",
+            )
+            for i, sr in enumerate(storage_results)
+        ],
         upload_time=job.created_at,
         progress_url=f"/api/v1/upload/jobs/{job.id}/stream",
     )
@@ -101,7 +117,7 @@ def _serialize_job(job: UploadJob) -> dict:
     return {
         "id": job.id,
         "status": job.status,
-        "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+        "updated_at": format_local(job.updated_at),
         "note_id": job.note_id,
         "error_logs": job.error_logs,
     }

@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 from app.models.note import Note
+from app.utils.datetime_fmt import format_local
 
 class ExportService:
     @staticmethod
@@ -9,7 +10,7 @@ class ExportService:
         structured_data = note.structured_data
         
         content = f"# {note.title}\n\n"
-        content += f"**创建时间**: {note.created_at.strftime('%Y-%m-%d %H:%M')}\n\n"
+        content += f"**创建时间**: {format_local(note.created_at)}\n\n"
         
         if 'summary' in structured_data:
             content += f"## 摘要\n{structured_data['summary']}\n\n"
@@ -45,7 +46,7 @@ class ExportService:
         structured_data = note.structured_data
         
         content = f"标题: {note.title}\n"
-        content += f"创建时间: {note.created_at.strftime('%Y-%m-%d %H:%M')}\n"
+        content += f"创建时间: {format_local(note.created_at)}\n"
         content += "=" * 50 + "\n\n"
         
         if 'summary' in structured_data:
@@ -73,17 +74,17 @@ class ExportService:
         """导出为JSON格式"""
         export_data = {
             "title": note.title,
-            "created_at": note.created_at.isoformat(),
-            "updated_at": note.updated_at.isoformat() if note.updated_at else None,
+            "created_at": format_local(note.created_at),
+            "updated_at": format_local(note.updated_at),
             "category": note.category,
             "tags": note.tags,
             "is_favorite": note.is_favorite,
             "structured_data": note.structured_data,
             "original_text": note.original_text,
             "image_info": {
-                "filename": note.image_filename,
-                "url": note.image_url,
-                "size": note.image_size
+                "filenames": note.image_filenames or [],
+                "urls": note.image_urls or [],
+                "sizes": note.image_sizes or []
             }
         }
         return json.dumps(export_data, ensure_ascii=False, indent=2)
@@ -91,16 +92,18 @@ class ExportService:
     @staticmethod
     def export_note(note: Note, format_type: str) -> tuple[str, str]:
         """通用导出方法"""
+        time_str = format_local(note.created_at) or ""
+        file_time = time_str.replace("-", "").replace(":", "").replace(" ", "_")[:13]
         if format_type == "md":
             content = ExportService.export_to_markdown(note)
-            filename = f"{note.title}_{note.created_at.strftime('%Y%m%d_%H%M')}.md"
+            filename = f"{note.title}_{file_time}.md"
         elif format_type == "txt":
             content = ExportService.export_to_txt(note)
-            filename = f"{note.title}_{note.created_at.strftime('%Y%m%d_%H%M')}.txt"
+            filename = f"{note.title}_{file_time}.txt"
         elif format_type == "json":
             content = ExportService.export_to_json(note)
-            filename = f"{note.title}_{note.created_at.strftime('%Y%m%d_%H%M')}.json"
+            filename = f"{note.title}_{file_time}.json"
         else:
             raise ValueError(f"不支持的导出格式: {format_type}")
-        
+
         return content, filename

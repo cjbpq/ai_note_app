@@ -3,7 +3,7 @@ import uuid
 import logging
 
 from sqlalchemy import and_, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.models.note import Note
 from app.core.exceptions import NoteNotFoundError
@@ -13,6 +13,15 @@ logger = logging.getLogger(__name__)
 
 class NoteService:
     """笔记相关业务逻辑"""
+
+    # 列表接口只需要加载的字段（排除 original_text 和 structured_data）
+    SUMMARY_FIELDS = [
+        Note.id, Note.user_id, Note.device_id,
+        Note.title, Note.category, Note.tags,
+        Note.image_urls, Note.image_filenames, Note.image_sizes,
+        Note.is_favorite, Note.is_archived,
+        Note.created_at, Note.updated_at,
+    ]
 
     def __init__(self, db: Session):
         self.db = db
@@ -37,8 +46,10 @@ class NoteService:
         return or_(Note.user_id == user_id, and_(Note.user_id.is_(None), Note.device_id == user_id))
 
     def get_user_notes(self, user_id: str, skip: int = 0, limit: int = 100) -> List[Note]:
+        """获取用户笔记列表（轻量级，不加载大字段）"""
         return (
             self.db.query(Note)
+            .options(load_only(*self.SUMMARY_FIELDS))
             .filter(self._ownership_filter(user_id), Note.is_archived.is_(False))
             .order_by(Note.created_at.desc())
             .offset(skip)
@@ -50,8 +61,22 @@ class NoteService:
         return str(note_id)
 
     def get_note_by_id(self, note_id: Union[str, uuid.UUID], user_id: str) -> Optional[Note]:
+        """获取完整笔记详情（包含所有字段）"""
         return (
             self.db.query(Note)
+            .filter(
+                Note.id == self._normalize_id(note_id),
+                self._ownership_filter(user_id),
+                Note.is_archived.is_(False),
+            )
+            .first()
+        )
+
+    def get_note_summary_by_id(self, note_id: Union[str, uuid.UUID], user_id: str) -> Optional[Note]:
+        """获取轻量级笔记摘要（不包含大字段）"""
+        return (
+            self.db.query(Note)
+            .options(load_only(*self.SUMMARY_FIELDS))
             .filter(
                 Note.id == self._normalize_id(note_id),
                 self._ownership_filter(user_id),
@@ -104,8 +129,10 @@ class NoteService:
         return note
 
     def get_notes_by_category(self, user_id: str, category: str) -> List[Note]:
+        """按分类获取笔记列表（轻量级，不加载大字段）"""
         return (
             self.db.query(Note)
+            .options(load_only(*self.SUMMARY_FIELDS))
             .filter(
                 self._ownership_filter(user_id),
                 Note.category == category,
@@ -116,7 +143,7 @@ class NoteService:
         )
 
     def search_notes(self, user_id: str, query: str) -> List[Note]:
-        """���索用户笔记
+        """搜索用户笔记（轻量级，不加载大字段）
 
         改前问题: 使用 f-string 手动拼接通配符 like_expr = f"%{query}%", 存在 SQL 注入风险
         为什么改: 移除手动拼接, 直接在 .ilike() 中使用 f-string, SQLAlchemy 会自动参数化转义
@@ -124,9 +151,11 @@ class NoteService:
         - ORM 参数化查询: SQLAlchemy 的 .filter() 和 .ilike() 方法会自动转义参数, 防止 SQL 注入
         - 安全编程原则: 永远不要手动拼接 SQL 字符串, 即使是 f"SELECT * FROM notes WHERE title LIKE '%{query}%'"
         - SQL 注入风险: 攻击者可通过 query="'; DROP TABLE notes;--" 删除数据库表
+        - load_only 不影响 filter 条件: 搜索条件可以使用 original_text，但返回结果不包含该字段
         """
         return (
             self.db.query(Note)
+            .options(load_only(*self.SUMMARY_FIELDS))
             .filter(
                 self._ownership_filter(user_id),
                 Note.is_archived.is_(False),

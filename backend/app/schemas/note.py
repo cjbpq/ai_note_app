@@ -1,7 +1,8 @@
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
-from datetime import datetime
 import uuid
+
+from app.utils.datetime_fmt import LocalDatetime
 
 class NoteBase(BaseModel):
     title: str
@@ -9,9 +10,9 @@ class NoteBase(BaseModel):
     tags: Optional[List[str]] = []
 
 class NoteCreate(NoteBase):
-    image_url: str
-    image_filename: str
-    image_size: int
+    image_urls: List[str]
+    image_filenames: List[str]
+    image_sizes: List[int]
     original_text: str
     structured_data: Dict[str, Any]
 
@@ -23,25 +24,42 @@ class NoteUpdate(BaseModel):
     original_text: Optional[str] = None
     structured_data: Optional[Dict[str, Any]] = None
 
-class NoteResponse(NoteBase):
+class NoteSummary(NoteBase):
+    """轻量级笔记模型，用于列表展示（不包含大字段 original_text 和 structured_data）"""
     id: uuid.UUID
     user_id: Optional[str] = None
     device_id: str
-    image_url: str
-    image_filename: str
-    image_size: int
+    image_urls: List[str]
+    image_filenames: List[str]
+    image_sizes: List[int]
+    is_favorite: bool
+    is_archived: bool
+    created_at: LocalDatetime
+    updated_at: LocalDatetime
+
+    class Config:
+        from_attributes = True
+
+class NoteResponse(NoteBase):
+    """完整笔记模型，用于详情展示（包含所有字段）"""
+    id: uuid.UUID
+    user_id: Optional[str] = None
+    device_id: str
+    image_urls: List[str]
+    image_filenames: List[str]
+    image_sizes: List[int]
     original_text: str
     structured_data: Dict[str, Any]
     is_favorite: bool
     is_archived: bool
-    created_at: datetime
-    updated_at: datetime
+    created_at: LocalDatetime
+    updated_at: LocalDatetime
 
     class Config:
         from_attributes = True
 
 class NoteListResponse(BaseModel):
-    notes: List[NoteResponse]
+    notes: List[NoteSummary]
     total: int
 
 class ExportFormat(BaseModel):
@@ -52,6 +70,6 @@ class NoteGenerationJobResponse(BaseModel):
     job_id: str
     status: str
     detail: Optional[str] = None
-    file_url: Optional[str] = None
-    queued_at: datetime
+    file_urls: Optional[List[str]] = None
+    queued_at: LocalDatetime
     progress_url: Optional[str] = None

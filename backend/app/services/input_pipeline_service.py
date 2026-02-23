@@ -5,7 +5,7 @@ import mimetypes
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
@@ -14,7 +14,10 @@ from app.models.upload_job import UploadJob
 from app.services.storage_backends import LocalStorageBackend, StorageBackend, StorageResult
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff"}
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB per file
+MAX_IMAGE_COUNT = 10
+MAX_CONCURRENT_NOTE_JOBS_PER_USER = 10
+TERMINAL_JOB_STATUSES = {"FAILED", "PERSISTED"}
 
 
 class InputPipelineService:
@@ -26,32 +29,49 @@ class InputPipelineService:
 
     def create_job(
         self,
-        file: UploadFile,
+        files: List[UploadFile],
         *,
         user_id: Optional[str],
         device_id: Optional[str],
         source: Optional[str] = None,
-    ) -> tuple[UploadJob, StorageResult]:
-        if not file.filename:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="上传文件缺少文件名")
+    ) -> tuple[UploadJob, List[StorageResult]]:
+        if not files:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="没有上传文件")
 
-        extension = os.path.splitext(file.filename)[1].lower()
-        if extension not in ALLOWED_EXTENSIONS:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"不支持的文件类型: {extension}")
+        if len(files) > MAX_IMAGE_COUNT:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="传入图片请小于或等于10张")
 
-        file_bytes = file.file.read()
-        if not file_bytes:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="上传文件为空")
-
-        file_size = len(file_bytes)
-        if file_size > MAX_FILE_SIZE:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="文件大小超出限制 (10MB)")
-
-        checksum = hashlib.sha256(file_bytes).hexdigest()
-        file.file.seek(0)
-
-        content_type = file.content_type or mimetypes.guess_type(file.filename)[0] or "application/octet-stream"
         job_id = str(uuid.uuid4())
+        file_metas = []
+        all_file_bytes = []
+
+        for file in files:
+            if not file.filename:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="上传文件缺少文件名")
+
+            extension = os.path.splitext(file.filename)[1].lower()
+            if extension not in ALLOWED_EXTENSIONS:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"不支持的文件类型: {extension}")
+
+            file_bytes = file.file.read()
+            if not file_bytes:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"上传文件为空: {file.filename}")
+
+            file_size = len(file_bytes)
+            if file_size > MAX_FILE_SIZE:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"文件大小超出限制 (10MB): {file.filename}")
+
+            checksum = hashlib.sha256(file_bytes).hexdigest()
+            content_type = file.content_type or mimetypes.guess_type(file.filename)[0] or "application/octet-stream"
+
+            file_metas.append({
+                "original_name": file.filename,
+                "extension": extension,
+                "size": file_size,
+                "content_type": content_type,
+                "checksum": checksum,
+            })
+            all_file_bytes.append((file_bytes, extension, content_type))
 
         job = UploadJob(
             id=job_id,
@@ -59,46 +79,43 @@ class InputPipelineService:
             device_id=device_id,
             source=source or "unknown",
             status="RECEIVED",
-            file_meta={
-                "original_name": file.filename,
-                "extension": extension,
-                "size": file_size,
-                "content_type": content_type,
-                "checksum": checksum,
-            },
+            file_meta={"files": file_metas, "total_size": sum(m["size"] for m in file_metas)},
             storage={},
         )
 
         self.db.add(job)
 
+        storage_results = []
         try:
-            storage_result = self.storage.store_bytes(
-                file_bytes,
-                filename=f"{job_id}{extension}",
-                content_type=content_type,
-            )
+            for idx, (file_bytes, extension, content_type) in enumerate(all_file_bytes):
+                storage_result = self.storage.store_bytes(
+                    file_bytes,
+                    filename=f"{job_id}_{idx}{extension}",
+                    content_type=content_type,
+                )
+                storage_results.append(storage_result)
         except Exception:
             self.db.rollback()
             raise
 
-        job.storage = {
-            "location": storage_result.location,
-            "path": storage_result.path,
-            "bucket": storage_result.bucket,
-            "url": storage_result.url,
-            "content_type": storage_result.content_type,
-            "size": storage_result.size,
-        }
+        job.storage = [
+            {
+                "location": sr.location,
+                "path": sr.path,
+                "bucket": sr.bucket,
+                "url": sr.url,
+                "content_type": sr.content_type,
+                "size": sr.size,
+            }
+            for sr in storage_results
+        ]
         job.status = "STORED"
-        # 学习要点: 使用 timezone-aware datetime 替代 naive datetime
-        # datetime.utcnow() 在 Python 3.12+ 已弃用
-        # datetime.now(timezone.utc) 返回带时区信息的 datetime, 避免时区转换错误
         job.updated_at = datetime.now(timezone.utc)
 
         self.db.commit()
         self.db.refresh(job)
 
-        return job, storage_result
+        return job, storage_results
 
     def get_job(self, job_id: str) -> UploadJob:
         job = self.db.query(UploadJob).filter(UploadJob.id == job_id).first()
@@ -113,3 +130,12 @@ class InputPipelineService:
         if status_filter:
             query = query.filter(UploadJob.status == status_filter)
         return query.order_by(UploadJob.created_at.desc()).all()
+
+    def count_active_jobs(self, *, user_id: str, source: Optional[str] = None) -> int:
+        query = self.db.query(UploadJob).filter(
+            UploadJob.user_id == user_id,
+            UploadJob.status.notin_(TERMINAL_JOB_STATUSES),
+        )
+        if source:
+            query = query.filter(UploadJob.source == source)
+        return query.count()
