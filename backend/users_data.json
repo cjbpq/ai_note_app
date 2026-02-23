@@ -1,9 +1,0 @@
-{
-  "testuser": {
-    "id": "d6908796-653e-47b6-aca6-8f10a8acc9b0",
-    "username": "testuser",
-    "email": "test@example.com",
-    "password_hash": "$2b$12$USMGX/JO8KVoRv3kOxfseeVFJqgTjgIUtR7GgpqSO0fgZhNnwshem",
-    "created_at": "2025-09-30T02:45:26.577800"
-  }
-}
