@@ -13,7 +13,10 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "此应用需要使用相机拍摄笔记照片，以便进行文字识别和智能分析。Camera access is required to capture note photos for text recognition.",
-        "NSPhotoLibraryUsageDescription": "此应用需要访问您的相册，以便选取笔记照片进行文字识别。Photo library access is required to select note images for text recognition."
+        "NSPhotoLibraryUsageDescription": "此应用需要访问您的相册，以便选取笔记照片进行文字识别。Photo library access is required to select note images for text recognition.",
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
       }
     },
     "android": {

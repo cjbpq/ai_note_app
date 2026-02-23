@@ -62,10 +62,28 @@ export const useToastStore = create<ToastState>((set, get) => ({
     const { currentToast } = get();
 
     if (currentToast) {
-      // 当前有 Toast 显示中，将新消息加入队列
-      set((state) => ({
-        queue: [...state.queue, newToast],
-      }));
+      set((state) => {
+        // 队列策略：
+        // 1) error 优先，插队到队首
+        // 2) 当前为 info 且新消息为 error 时，允许中断 info 立即显示 error
+        if (newToast.type === "error" && state.currentToast?.type === "info") {
+          return {
+            currentToast: newToast,
+            queue: [state.currentToast, ...state.queue],
+          };
+        }
+
+        if (newToast.type === "error") {
+          return {
+            queue: [newToast, ...state.queue],
+          };
+        }
+
+        // 非 error 默认 FIFO
+        return {
+          queue: [...state.queue, newToast],
+        };
+      });
     } else {
       // 无显示中的 Toast，直接显示
       set({ currentToast: newToast });

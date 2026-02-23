@@ -1,38 +1,11 @@
-import { AxiosError } from "axios";
 import { ENDPOINTS } from "../constants/config";
 import i18next from "../i18n";
 import { AuthForm, LoginResponse, TokenRefreshResponse, User } from "../types";
 import api from "./api";
+import { parseServiceError } from "./errorService";
 import { tokenService } from "./tokenService";
 
 const USE_MOCK = process.env.EXPO_PUBLIC_USE_MOCK === "true";
-
-/** 提取后端错误信息，优先使用 422 detail.msg，避免 UI 处理 axios 细节 */
-const extractApiErrorMessage = (
-  error: unknown,
-  fallbackKey: string,
-): string => {
-  if (error instanceof AxiosError) {
-    const data = error.response?.data as any;
-    if (Array.isArray(data?.detail) && data.detail.length > 0) {
-      const first = data.detail[0];
-      const msg = first?.msg as string | undefined;
-      const loc = Array.isArray(first?.loc) ? first.loc.join(".") : undefined;
-      if (msg) {
-        return loc ? `${loc}: ${msg}` : msg;
-      }
-    }
-    if (typeof data?.message === "string") {
-      return data.message;
-    }
-  }
-
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return i18next.t(fallbackKey);
-};
 
 export const authService = {
   /**
@@ -97,7 +70,24 @@ export const authService = {
 
       return { token: accessToken, user };
     } catch (error) {
-      throw new Error(extractApiErrorMessage(error, "auth.login_failed"));
+      throw parseServiceError(error, {
+        fallbackKey: "error.auth.loginFailed",
+        statusMap: {
+          401: {
+            key: "error.auth.invalidCredentials",
+            toastType: "error",
+          },
+          422: {
+            key: "error.validation.invalid",
+            toastType: "warning",
+          },
+          429: {
+            key: "error.common.rateLimited",
+            toastType: "warning",
+            retryable: true,
+          },
+        },
+      });
     }
   },
 
@@ -117,8 +107,21 @@ export const authService = {
       };
     }
 
-    const response = await api.get<User>(ENDPOINTS.AUTH.ME);
-    return response as unknown as User;
+    try {
+      const response = await api.get<User>(ENDPOINTS.AUTH.ME);
+      return response as unknown as User;
+    } catch (error) {
+      throw parseServiceError(error, {
+        fallbackKey: "error.auth.fetchUserFailed",
+        statusMap: {
+          401: {
+            key: "error.auth.unauthorized",
+            toastType: "info",
+            actionKey: "common.login",
+          },
+        },
+      });
+    }
   },
 
   /**
@@ -145,7 +148,29 @@ export const authService = {
       );
       return response as unknown as { message: string; user_id: string };
     } catch (error) {
-      throw new Error(extractApiErrorMessage(error, "auth.register_failed"));
+      throw parseServiceError(error, {
+        fallbackKey: "error.auth.registerFailed",
+        statusMap: {
+          400: {
+            // 临时兜底：后端校验标准未稳定时，将常见重复用户名场景友好提示
+            key: "error.auth.userExists",
+            toastType: "warning",
+          },
+          409: {
+            key: "error.auth.userExists",
+            toastType: "warning",
+          },
+          422: {
+            key: "error.validation.invalid",
+            toastType: "warning",
+          },
+          429: {
+            key: "error.common.rateLimited",
+            toastType: "warning",
+            retryable: true,
+          },
+        },
+      });
     }
   },
 
@@ -174,15 +199,28 @@ export const authService = {
       };
     }
 
-    const response = await api.post<TokenRefreshResponse>(
-      ENDPOINTS.AUTH.REFRESH,
-    );
-    const data = response as unknown as TokenRefreshResponse;
+    try {
+      const response = await api.post<TokenRefreshResponse>(
+        ENDPOINTS.AUTH.REFRESH,
+      );
+      const data = response as unknown as TokenRefreshResponse;
 
-    // 保存新 Token
-    await tokenService.saveToken(data.access_token, data.expires_at);
+      // 保存新 Token
+      await tokenService.saveToken(data.access_token, data.expires_at);
 
-    return data;
+      return data;
+    } catch (error) {
+      throw parseServiceError(error, {
+        fallbackKey: "error.auth.refreshFailed",
+        statusMap: {
+          401: {
+            key: "error.auth.unauthorized",
+            toastType: "info",
+            actionKey: "common.login",
+          },
+        },
+      });
+    }
   },
 
   /**

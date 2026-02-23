@@ -13,6 +13,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, View } from "react-native";
 import { Surface, Text, useTheme } from "react-native-paper";
+import { toSafeStringArray } from "../../utils/safeData";
 
 // ========== Props 类型定义 ==========
 interface NoteWarningsProps {
@@ -27,9 +28,10 @@ interface NoteWarningsProps {
 export const NoteWarnings: React.FC<NoteWarningsProps> = ({ warnings }) => {
   const { t } = useTranslation();
   const theme = useTheme();
+  const safeWarnings = toSafeStringArray(warnings);
 
   // 无警告时不渲染
-  if (!warnings || warnings.length === 0) return null;
+  if (safeWarnings.length === 0) return null;
 
   return (
     <Surface
@@ -55,7 +57,7 @@ export const NoteWarnings: React.FC<NoteWarningsProps> = ({ warnings }) => {
       </View>
 
       {/* 警告列表 */}
-      {warnings.map((warning, index) => (
+      {safeWarnings.map((warning, index) => (
         <View key={`warn-${index}`} style={styles.warningRow}>
           <Text
             variant="bodySmall"

@@ -6,5 +6,8 @@
  */
 export { ErrorScreen } from "./ErrorScreen";
 export { GlobalSnackbar } from "./GlobalSnackbar";
+export { ImageCarousel } from "./ImageCarousel";
+export { ImageViewerModal } from "./ImageViewerModal";
 export { LoadingScreen } from "./LoadingScreen";
 export { ThemeModeToggle } from "./ThemeModeToggle";
+

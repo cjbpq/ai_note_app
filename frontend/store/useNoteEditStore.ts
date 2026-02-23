@@ -10,6 +10,7 @@
  * - 使用 Zustand 管理纯客户端状态
  * - 与 React Query 管理的服务端状态分离
  * - 草稿保存到 AsyncStorage，支持离开后恢复
+ * - formData 支持结构化字段（summary / keyPoints），保存时可构造 structuredData 更新
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
@@ -21,12 +22,24 @@ const DRAFT_STORAGE_KEY_PREFIX = "note_draft_";
 // ========== 类型定义 ==========
 
 /**
- * 编辑表单数据
+ * 编辑表单数据（扩展版，支持结构化字段编辑）
+ *
+ * 字段说明：
+ * - title: 笔记标题（可编辑）
+ * - category: 分类（可编辑，自由文本）
+ * - tags: 标签数组（Chip 形式增删）
+ * - summary: AI 摘要（可编辑多行文本）
+ * - keyPoints: 知识要点数组（逐条增删编辑）
+ * - content: 已废弃，保留空串以兼容草稿恢复
  */
-interface NoteEditFormData {
+export interface NoteEditFormData {
   title: string;
+  category: string;
+  tags: string[];
+  summary: string;
+  keyPoints: string[];
+  /** @deprecated 保留以兼容旧草稿恢复，新编辑流程不再使用 */
   content: string;
-  tags: string; // 逗号分隔的标签字符串，便于用户输入
 }
 
 /**
@@ -50,78 +63,92 @@ interface NoteEditState {
   /** 是否有未保存的更改（用于离开提示） */
   hasUnsavedChanges: boolean;
 
-  // ===== 操作方法 =====
-  /**
-   * 进入编辑模式
-   * @param noteId - 笔记ID
-   * @param initialData - 初始表单数据（来自笔记原始数据）
-   */
+  // ===== 基础操作 =====
+  /** 进入编辑模式 */
   startEditing: (noteId: string, initialData: NoteEditFormData) => void;
-
-  /**
-   * 更新表单字段
-   * @param field - 字段名
-   * @param value - 新值
-   */
+  /** 更新表单的文本字段（title / category / summary / content） */
   updateField: <K extends keyof NoteEditFormData>(
     field: K,
     value: NoteEditFormData[K],
   ) => void;
-
-  /**
-   * 取消编辑，重置为初始数据，并清除草稿
-   * @param initialData - 原始数据（可选，用于重置表单）
-   */
+  /** 取消编辑，重置为初始数据，并清除草稿 */
   cancelEditing: (initialData?: NoteEditFormData) => void;
-
-  /**
-   * 完成编辑（保存成功后调用），并清除草稿
-   */
+  /** 完成编辑（保存成功后调用），并清除草稿 */
   finishEditing: () => void;
 
-  /**
-   * 离开页面时保存草稿（如果有未保存更改）
-   */
+  // ===== 标签操作 =====
+  /** 添加标签 */
+  addTag: (tag: string) => void;
+  /** 移除标签 */
+  removeTag: (tag: string) => void;
+
+  // ===== 知识要点操作 =====
+  /** 添加一条要点 */
+  addKeyPoint: (point: string) => void;
+  /** 移除指定索引的要点 */
+  removeKeyPoint: (index: number) => void;
+  /** 更新指定索引的要点文本 */
+  updateKeyPoint: (index: number, text: string) => void;
+
+  // ===== 草稿操作 =====
+  /** 离开页面时保存草稿（如果有未保存更改） */
   saveDraftAndClear: () => Promise<void>;
-
-  /**
-   * 检查是否存在草稿
-   * @param noteId - 笔记ID
-   * @returns 草稿数据或 null
-   */
+  /** 检查是否存在草稿 */
   checkDraft: (noteId: string) => Promise<DraftData | null>;
-
-  /**
-   * 从草稿恢复编辑状态
-   * @param noteId - 笔记ID
-   * @param draft - 草稿数据
-   */
+  /** 从草稿恢复编辑状态 */
   restoreFromDraft: (noteId: string, draft: DraftData) => void;
-
-  /**
-   * 清除指定笔记的草稿
-   * @param noteId - 笔记ID
-   */
+  /** 清除指定笔记的草稿 */
   clearDraft: (noteId: string) => Promise<void>;
 
-  /**
-   * 获取标签数组（将逗号分隔的字符串转为数组）
-   */
+  // ===== 兼容方法 =====
+  /** 获取标签数组（直接返回 tags，向后兼容） */
   getTagsArray: () => string[];
 }
 
 // ========== 初始状态 ==========
 const initialFormData: NoteEditFormData = {
   title: "",
+  category: "",
+  tags: [],
+  summary: "",
+  keyPoints: [],
   content: "",
-  tags: "",
 };
 
 // ========== 辅助函数 ==========
-/**
- * 生成草稿存储的 key
- */
+/** 生成草稿存储的 key */
 const getDraftKey = (noteId: string) => `${DRAFT_STORAGE_KEY_PREFIX}${noteId}`;
+
+/**
+ * 兼容旧草稿格式（tags 可能是逗号分隔字符串）
+ * 确保恢复后 formData 是新格式
+ */
+const normalizeDraftData = (raw: Record<string, unknown>): DraftData => {
+  const title = (raw.title as string) ?? "";
+  const category = (raw.category as string) ?? "";
+  const summary = (raw.summary as string) ?? "";
+  const content = (raw.content as string) ?? "";
+  const savedAt = (raw.savedAt as number) ?? Date.now();
+
+  // tags 兼容：旧格式为逗号分隔字符串，新格式为数组
+  let tags: string[] = [];
+  if (Array.isArray(raw.tags)) {
+    tags = raw.tags as string[];
+  } else if (typeof raw.tags === "string") {
+    tags = (raw.tags as string)
+      .split(",")
+      .map((t: string) => t.trim())
+      .filter((t: string) => t.length > 0);
+  }
+
+  // keyPoints 兼容：旧草稿可能没有此字段
+  let keyPoints: string[] = [];
+  if (Array.isArray(raw.keyPoints)) {
+    keyPoints = raw.keyPoints as string[];
+  }
+
+  return { title, category, tags, summary, keyPoints, content, savedAt };
+};
 
 // ========== Store 实现 ==========
 export const useNoteEditStore = create<NoteEditState>((set, get) => ({
@@ -130,6 +157,8 @@ export const useNoteEditStore = create<NoteEditState>((set, get) => ({
   isEditing: false,
   formData: { ...initialFormData },
   hasUnsavedChanges: false,
+
+  // ===== 基础操作 =====
 
   // 进入编辑模式
   startEditing: (noteId, initialData) => {
@@ -141,7 +170,7 @@ export const useNoteEditStore = create<NoteEditState>((set, get) => ({
     });
   },
 
-  // 更新表单字段
+  // 更新表单字段（通用）
   updateField: (field, value) => {
     set((state) => ({
       formData: {
@@ -155,11 +184,8 @@ export const useNoteEditStore = create<NoteEditState>((set, get) => ({
   // 取消编辑并清除草稿
   cancelEditing: (initialData) => {
     const { editingNoteId } = get();
-    // 清除草稿
     if (editingNoteId) {
-      AsyncStorage.removeItem(getDraftKey(editingNoteId)).catch(() => {
-        // 静默失败，不影响用户体验
-      });
+      AsyncStorage.removeItem(getDraftKey(editingNoteId)).catch(() => {});
     }
     set({
       isEditing: false,
@@ -171,11 +197,8 @@ export const useNoteEditStore = create<NoteEditState>((set, get) => ({
   // 完成编辑并清除草稿
   finishEditing: () => {
     const { editingNoteId } = get();
-    // 保存成功后清除草稿
     if (editingNoteId) {
-      AsyncStorage.removeItem(getDraftKey(editingNoteId)).catch(() => {
-        // 静默失败
-      });
+      AsyncStorage.removeItem(getDraftKey(editingNoteId)).catch(() => {});
     }
     set({
       isEditing: false,
@@ -184,11 +207,79 @@ export const useNoteEditStore = create<NoteEditState>((set, get) => ({
     });
   },
 
-  // 离开页面时保存草稿
+  // ===== 标签操作 =====
+
+  addTag: (tag: string) => {
+    const trimmed = tag.trim();
+    if (!trimmed) return;
+    set((state) => {
+      // 去重：忽略已存在的标签
+      if (state.formData.tags.includes(trimmed)) return state;
+      return {
+        formData: {
+          ...state.formData,
+          tags: [...state.formData.tags, trimmed],
+        },
+        hasUnsavedChanges: true,
+      };
+    });
+  },
+
+  removeTag: (tag: string) => {
+    set((state) => ({
+      formData: {
+        ...state.formData,
+        tags: state.formData.tags.filter((t) => t !== tag),
+      },
+      hasUnsavedChanges: true,
+    }));
+  },
+
+  // ===== 知识要点操作 =====
+
+  addKeyPoint: (point: string) => {
+    const trimmed = point.trim();
+    if (!trimmed) return;
+    set((state) => ({
+      formData: {
+        ...state.formData,
+        keyPoints: [...state.formData.keyPoints, trimmed],
+      },
+      hasUnsavedChanges: true,
+    }));
+  },
+
+  removeKeyPoint: (index: number) => {
+    set((state) => ({
+      formData: {
+        ...state.formData,
+        keyPoints: state.formData.keyPoints.filter((_, i) => i !== index),
+      },
+      hasUnsavedChanges: true,
+    }));
+  },
+
+  updateKeyPoint: (index: number, text: string) => {
+    set((state) => {
+      const newPoints = [...state.formData.keyPoints];
+      if (index >= 0 && index < newPoints.length) {
+        newPoints[index] = text;
+      }
+      return {
+        formData: {
+          ...state.formData,
+          keyPoints: newPoints,
+        },
+        hasUnsavedChanges: true,
+      };
+    });
+  },
+
+  // ===== 草稿操作 =====
+
   saveDraftAndClear: async () => {
     const { editingNoteId, formData, hasUnsavedChanges } = get();
 
-    // 只有在有未保存更改时才保存草稿
     if (editingNoteId && hasUnsavedChanges) {
       const draftData: DraftData = {
         ...formData,
@@ -204,7 +295,6 @@ export const useNoteEditStore = create<NoteEditState>((set, get) => ({
       }
     }
 
-    // 清除内存状态
     set({
       editingNoteId: null,
       isEditing: false,
@@ -213,12 +303,12 @@ export const useNoteEditStore = create<NoteEditState>((set, get) => ({
     });
   },
 
-  // 检查是否存在草稿
   checkDraft: async (noteId: string): Promise<DraftData | null> => {
     try {
       const draftJson = await AsyncStorage.getItem(getDraftKey(noteId));
       if (draftJson) {
-        return JSON.parse(draftJson) as DraftData;
+        const raw = JSON.parse(draftJson) as Record<string, unknown>;
+        return normalizeDraftData(raw);
       }
     } catch {
       // 解析失败，返回 null
@@ -226,21 +316,22 @@ export const useNoteEditStore = create<NoteEditState>((set, get) => ({
     return null;
   },
 
-  // 从草稿恢复
   restoreFromDraft: (noteId: string, draft: DraftData) => {
     set({
       editingNoteId: noteId,
       isEditing: true,
       formData: {
-        title: draft.title,
-        content: draft.content,
-        tags: draft.tags,
+        title: draft.title ?? "",
+        category: draft.category ?? "",
+        tags: Array.isArray(draft.tags) ? draft.tags : [],
+        summary: draft.summary ?? "",
+        keyPoints: Array.isArray(draft.keyPoints) ? draft.keyPoints : [],
+        content: draft.content ?? "",
       },
-      hasUnsavedChanges: true, // 恢复后视为有更改
+      hasUnsavedChanges: true,
     });
   },
 
-  // 清除指定笔记的草稿
   clearDraft: async (noteId: string) => {
     try {
       await AsyncStorage.removeItem(getDraftKey(noteId));
@@ -249,12 +340,9 @@ export const useNoteEditStore = create<NoteEditState>((set, get) => ({
     }
   },
 
-  // 获取标签数组
+  // ===== 兼容方法 =====
+
   getTagsArray: () => {
-    const { tags } = get().formData;
-    return tags
-      .split(",")
-      .map((tag) => tag.trim())
-      .filter((tag) => tag.length > 0);
+    return get().formData.tags;
   },
 }));

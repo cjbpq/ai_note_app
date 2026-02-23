@@ -14,6 +14,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, View } from "react-native";
 import { Surface, Text, useTheme } from "react-native-paper";
+import { toSafeStringArray } from "../../utils/safeData";
 
 // ========== Props 类型定义 ==========
 interface NoteKeyPointsProps {
@@ -28,9 +29,10 @@ interface NoteKeyPointsProps {
 export const NoteKeyPoints: React.FC<NoteKeyPointsProps> = ({ keyPoints }) => {
   const { t } = useTranslation();
   const theme = useTheme();
+  const safeKeyPoints = toSafeStringArray(keyPoints);
 
   // 无要点时不渲染
-  if (!keyPoints || keyPoints.length === 0) return null;
+  if (safeKeyPoints.length === 0) return null;
 
   return (
     <Surface style={styles.container} elevation={0}>
@@ -43,7 +45,7 @@ export const NoteKeyPoints: React.FC<NoteKeyPointsProps> = ({ keyPoints }) => {
       </Text>
 
       {/* 要点列表（紧凑文本） */}
-      {keyPoints.map((point, index) => (
+      {safeKeyPoints.map((point, index) => (
         <View key={`kp-${index}`} style={styles.pointRow}>
           {/* 小序号圆点 */}
           <View

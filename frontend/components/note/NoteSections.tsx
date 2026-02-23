@@ -13,8 +13,9 @@ import React, { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, View } from "react-native";
 import { Divider, List, Surface, Text, useTheme } from "react-native-paper";
-import MathWebView from "../MathWebView";
 import { SmartNoteSection } from "../../types";
+import { toSafeSections } from "../../utils/safeData";
+import MathWebView from "../MathWebView";
 
 // ========== Props 类型定义 ==========
 interface NoteSectionsProps {
@@ -29,10 +30,11 @@ interface NoteSectionsProps {
 export const NoteSections: React.FC<NoteSectionsProps> = ({ sections }) => {
   const { t } = useTranslation();
   const theme = useTheme();
+  const safeSections = toSafeSections(sections);
 
   // 展开状态管理：默认全部展开（章节是主体内容，不应默认折叠）
   const [expandedIds, setExpandedIds] = useState<Set<number>>(
-    () => new Set(sections?.map((_, i) => i) ?? []),
+    () => new Set(safeSections.map((_, i) => i)),
   );
 
   // 切换某个章节的展开/折叠状态
@@ -49,7 +51,7 @@ export const NoteSections: React.FC<NoteSectionsProps> = ({ sections }) => {
   }, []);
 
   // 无章节数据时不渲染
-  if (!sections || sections.length === 0) return null;
+  if (safeSections.length === 0) return null;
 
   return (
     <Surface style={styles.container} elevation={0}>
@@ -63,7 +65,7 @@ export const NoteSections: React.FC<NoteSectionsProps> = ({ sections }) => {
 
       {/* 章节列表 */}
       <List.Section>
-        {sections.map((section, index) => (
+        {safeSections.map((section, index) => (
           <View key={`sec-${index}`}>
             {/* 章节间分隔线（非第一个） */}
             {index > 0 && <Divider />}

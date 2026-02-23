@@ -1,11 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect } from "react";
+import i18next from "../i18n";
 import { authEventEmitter } from "../services/api";
 import { authService } from "../services/authService";
 import { clearLocalNotes } from "../services/database";
 import { useAuthStore } from "../store/useAuthStore";
-import { AuthForm, LoginResponse } from "../types";
+import { AuthForm, LoginResponse, ServiceError } from "../types";
+import { useToast } from "./useToast";
 
 /**
  * 身份认证 Hook
@@ -23,6 +25,7 @@ import { AuthForm, LoginResponse } from "../types";
 export const useAuth = () => {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { showError, showSuccess, showInfo } = useToast();
   const setAuth = useAuthStore((state) => state.setAuth);
   const clearAuth = useAuthStore((state) => state.clearAuth);
 
@@ -70,9 +73,13 @@ export const useAuth = () => {
       // 登录成功，更新 Store（Token 已由 Service 保存）
       setAuth(data.user);
       console.log("[useAuth] Login success:", data.user.username);
+      showSuccess(i18next.t("auth.login_success"));
     },
     onError: (error: Error) => {
-      console.error("[useAuth] Login failed:", error.message);
+      if (__DEV__) {
+        console.log("[useAuth] Login failed:", error.message);
+      }
+      showError(error.message || i18next.t("error.auth.loginFailed"));
     },
   });
 
@@ -83,9 +90,13 @@ export const useAuth = () => {
     mutationFn: (form: AuthForm) => authService.register(form),
     onSuccess: (data) => {
       console.log("[useAuth] Register success:", data);
+      showSuccess(i18next.t("auth.register_success"));
     },
     onError: (error: Error) => {
-      console.error("[useAuth] Register failed:", error.message);
+      if (__DEV__) {
+        console.log("[useAuth] Register failed:", error.message);
+      }
+      showError(error.message || i18next.t("error.auth.registerFailed"));
     },
   });
 
@@ -99,13 +110,17 @@ export const useAuth = () => {
       clearAuth();
       router.replace("/login");
       console.log("[useAuth] Logout success");
+      showInfo(i18next.t("auth.logout_success"));
     },
     onError: (error: Error) => {
       // 即使退出失败，也清理本地状态
       clearAccountBoundCaches();
       clearAuth();
       router.replace("/login");
-      console.error("[useAuth] Logout error:", error.message);
+      if (__DEV__) {
+        console.log("[useAuth] Logout error:", error.message);
+      }
+      showError(i18next.t("error.auth.logoutFailed"));
     },
   });
 
@@ -118,7 +133,14 @@ export const useAuth = () => {
       console.log("[useAuth] Token refreshed manually");
     },
     onError: (error: Error) => {
-      console.error("[useAuth] Manual refresh failed:", error.message);
+      if (__DEV__) {
+        console.log("[useAuth] Manual refresh failed:", error.message);
+      }
+      showInfo(
+        error instanceof ServiceError
+          ? error.message
+          : i18next.t("error.auth.refreshFailed"),
+      );
       clearAuth();
       router.replace("/login");
     },

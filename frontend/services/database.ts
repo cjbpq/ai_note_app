@@ -12,8 +12,9 @@ import { Note } from "../types";
 let db: SQLite.SQLiteDatabase | null = null;
 
 // 数据库版本号 - 每次 schema 变更时递增
-// v2 -> v3: 对齐后端 NoteResponse 全字段
-const DB_VERSION = 3;
+// v3: 对齐后端 NoteResponse 全字段
+// v4: 图片字段从单值改为数组（imageUrl→imageUrls, imageFilename→imageFilenames, imageSize→imageSizes）
+const DB_VERSION = 4;
 
 // 获取数据库实例
 const getDB = async (): Promise<SQLite.SQLiteDatabase> => {
@@ -40,7 +41,7 @@ export const initDatabase = async () => {
       // 忽略删除失败
     }
 
-    // 创建新表结构，对齐 Note 接口
+    // 创建新表结构，对齐 Note 接口（v4：图片字段为 JSON 数组）
     await database.execAsync(`
       CREATE TABLE IF NOT EXISTS notes (
         id TEXT PRIMARY KEY NOT NULL,
@@ -49,9 +50,9 @@ export const initDatabase = async () => {
         date TEXT DEFAULT '',
         updatedAt TEXT DEFAULT '',
         tags TEXT DEFAULT '[]',
-        imageUrl TEXT DEFAULT '',
-        imageFilename TEXT DEFAULT '',
-        imageSize INTEGER DEFAULT 0,
+        imageUrls TEXT DEFAULT '[]',
+        imageFilenames TEXT DEFAULT '[]',
+        imageSizes TEXT DEFAULT '[]',
         category TEXT DEFAULT '',
         isFavorite INTEGER DEFAULT 0,
         isArchived INTEGER DEFAULT 0,
@@ -92,9 +93,9 @@ const noteToDbRow = (note: Note): (string | number)[] => {
     safeDate,
     note.updatedAt || safeDate,
     JSON.stringify(safeTags),
-    note.imageUrl || "",
-    note.imageFilename || "",
-    note.imageSize || 0,
+    JSON.stringify(note.imageUrls ?? []),
+    JSON.stringify(note.imageFilenames ?? []),
+    JSON.stringify(note.imageSizes ?? []),
     note.category || "",
     note.isFavorite ? 1 : 0,
     note.isArchived ? 1 : 0,
@@ -108,25 +109,41 @@ const noteToDbRow = (note: Note): (string | number)[] => {
 /**
  * 将 SQLite 行数据转换为 Note 对象
  */
-const dbRowToNote = (row: any): Note => ({
-  id: row.id,
-  title: row.title,
-  content: row.content,
-  date: row.date,
-  updatedAt: row.updatedAt || undefined,
-  tags: row.tags ? JSON.parse(row.tags) : [],
-  imageUrl: row.imageUrl || undefined,
-  imageFilename: row.imageFilename || undefined,
-  imageSize: row.imageSize || undefined,
-  category: row.category || undefined,
-  isFavorite: row.isFavorite === 1,
-  isArchived: row.isArchived === 1,
-  userId: row.userId || undefined,
-  deviceId: row.deviceId || undefined,
-  structuredData: row.structuredData
-    ? JSON.parse(row.structuredData)
-    : undefined,
-});
+const dbRowToNote = (row: any): Note => {
+  // 安全解析 JSON 数组字段（兼容旧版 DB 单值 / 空值）
+  const parseJsonArray = <T>(val: unknown, fallback: T[] = []): T[] => {
+    if (!val) return fallback;
+    if (typeof val === "string") {
+      try {
+        const parsed = JSON.parse(val);
+        return Array.isArray(parsed) ? parsed : [parsed];
+      } catch {
+        return fallback;
+      }
+    }
+    return fallback;
+  };
+
+  return {
+    id: row.id,
+    title: row.title,
+    content: row.content,
+    date: row.date,
+    updatedAt: row.updatedAt || undefined,
+    tags: row.tags ? JSON.parse(row.tags) : [],
+    imageUrls: parseJsonArray<string>(row.imageUrls),
+    imageFilenames: parseJsonArray<string>(row.imageFilenames),
+    imageSizes: parseJsonArray<number>(row.imageSizes),
+    category: row.category || undefined,
+    isFavorite: row.isFavorite === 1,
+    isArchived: row.isArchived === 1,
+    userId: row.userId || undefined,
+    deviceId: row.deviceId || undefined,
+    structuredData: row.structuredData
+      ? JSON.parse(row.structuredData)
+      : undefined,
+  };
+};
 
 /**
  * 批量覆盖/保存笔记 (用于 fetchNotes 下拉刷新)
@@ -143,7 +160,7 @@ export const saveNotesToLocal = async (notes: Note[]) => {
     for (const note of notes) {
       await database.runAsync(
         `INSERT OR REPLACE INTO notes 
-        (id, title, content, date, updatedAt, tags, imageUrl, imageFilename, imageSize,
+        (id, title, content, date, updatedAt, tags, imageUrls, imageFilenames, imageSizes,
          category, isFavorite, isArchived, userId, deviceId, structuredData, isSynced)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         // @ts-ignore SQLite 参数限制
@@ -162,7 +179,7 @@ export const saveNoteLocally = async (note: Note) => {
   const database = await getDB();
   await database.runAsync(
     `INSERT OR REPLACE INTO notes 
-    (id, title, content, date, updatedAt, tags, imageUrl, imageFilename, imageSize,
+    (id, title, content, date, updatedAt, tags, imageUrls, imageFilenames, imageSizes,
      category, isFavorite, isArchived, userId, deviceId, structuredData, isSynced)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     // @ts-ignore SQLite 参数限制

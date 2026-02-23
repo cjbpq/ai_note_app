@@ -11,7 +11,6 @@
  * - 编辑状态通过 useNoteEditStore 管理
  * - 数据获取通过 useNotes Hook
  */
-import { Ionicons } from "@expo/vector-icons";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
@@ -22,7 +21,8 @@ import {
   StyleSheet,
   View,
 } from "react-native";
-import { Button, IconButton, Text, useTheme } from "react-native-paper";
+import { IconButton, Text, useTheme } from "react-native-paper";
+import { ErrorScreen } from "../../components/common";
 
 // ===== 组件导入 =====
 import {
@@ -41,7 +41,11 @@ import {
 // ===== Hooks & Store =====
 import { useNotes } from "../../hooks/useNotes";
 import { useToast } from "../../hooks/useToast";
+import type { NoteEditFormData } from "../../store/useNoteEditStore";
 import { useNoteEditStore } from "../../store/useNoteEditStore";
+import { useUploadTaskStore } from "../../store/useUploadTaskStore";
+import { ServiceError } from "../../types";
+import { toSafeStringArray } from "../../utils/safeData";
 
 /**
  * 笔记详情页面组件
@@ -52,8 +56,32 @@ export default function NoteDetailScreen() {
   const router = useRouter();
   const { showSuccess, showError } = useToast();
 
+  /**
+   * 从 Note 数据构建编辑表单初始数据
+   * 统一提取结构化字段，避免在多处重复构造
+   */
+  const buildInitialFormData = useCallback(
+    (n: typeof note): NoteEditFormData => ({
+      title: n?.title ?? "",
+      category: n?.category ?? "",
+      tags: toSafeStringArray(n?.tags),
+      summary: n?.structuredData?.summary ?? "",
+      keyPoints: toSafeStringArray(n?.structuredData?.keyPoints),
+      content: "",
+    }),
+    [],
+  );
+
   // ===== 路由参数 =====
   const { id } = useLocalSearchParams<{ id: string }>();
+
+  // ===== 标记新笔记为已查看（驱动阅读 Tab 角标减少） =====
+  const markNoteViewed = useUploadTaskStore((s) => s.markNoteViewed);
+  useEffect(() => {
+    if (id) {
+      markNoteViewed(id);
+    }
+  }, [id, markNoteViewed]);
 
   // ===== 数据层 Hook =====
   const {
@@ -65,7 +93,13 @@ export default function NoteDetailScreen() {
     toggleFavorite,
     isTogglingFavorite,
   } = useNotes();
-  const { data: note, isLoading, isError, refetch } = useNote(id ?? null);
+  const {
+    data: note,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useNote(id ?? null);
 
   // ===== 编辑状态 Store =====
   const {
@@ -77,7 +111,6 @@ export default function NoteDetailScreen() {
     checkDraft,
     restoreFromDraft,
     clearDraft,
-    getTagsArray,
     formData,
   } = useNoteEditStore();
 
@@ -100,11 +133,7 @@ export default function NoteDetailScreen() {
           style: "destructive",
           onPress: () => {
             if (note) {
-              cancelEditing({
-                title: note.title || "",
-                content: note.content || "",
-                tags: note.tags?.join(", ") || "",
-              });
+              cancelEditing(buildInitialFormData(note));
             }
           },
         },
@@ -112,16 +141,17 @@ export default function NoteDetailScreen() {
     } else {
       router.back();
     }
-  }, [isEditing, note, cancelEditing, router, t]);
+  }, [isEditing, note, cancelEditing, buildInitialFormData, router, t]);
 
   // ===== 事件处理：进入编辑模式（含草稿恢复检查） =====
   const handleEdit = useCallback(async () => {
     if (!id || !note) return;
 
+    const initialData = buildInitialFormData(note);
+
     // 检查是否有草稿
     const draft = await checkDraft(id);
     if (draft) {
-      // 格式化草稿保存时间
       const savedTime = new Date(draft.savedAt).toLocaleString();
 
       Alert.alert(
@@ -132,73 +162,77 @@ export default function NoteDetailScreen() {
             text: t("noteDetail.draft_discard"),
             style: "destructive",
             onPress: () => {
-              // 放弃草稿，使用当前笔记数据
               clearDraft(id);
-              startEditing(id, {
-                title: note.title || "",
-                content: note.content || "",
-                tags: note.tags?.join(", ") || "",
-              });
+              startEditing(id, initialData);
             },
           },
           {
             text: t("noteDetail.draft_restore"),
             onPress: () => {
-              // 恢复草稿
               restoreFromDraft(id, draft);
             },
           },
         ],
       );
     } else {
-      // 无草稿，正常进入编辑
-      startEditing(id, {
-        title: note.title || "",
-        content: note.content || "",
-        tags: note.tags?.join(", ") || "",
-      });
+      startEditing(id, initialData);
     }
-  }, [id, note, checkDraft, clearDraft, startEditing, restoreFromDraft, t]);
+  }, [
+    id,
+    note,
+    buildInitialFormData,
+    checkDraft,
+    clearDraft,
+    startEditing,
+    restoreFromDraft,
+    t,
+  ]);
 
   // ===== 事件处理：取消编辑 =====
   const handleCancelEdit = useCallback(() => {
     if (note) {
-      cancelEditing({
-        title: note.title || "",
-        content: note.content || "",
-        tags: note.tags?.join(", ") || "",
-      });
+      cancelEditing(buildInitialFormData(note));
     }
-  }, [note, cancelEditing]);
+  }, [note, cancelEditing, buildInitialFormData]);
 
   // ===== 事件处理：保存编辑 =====
   const handleSave = useCallback(() => {
-    if (!id) return;
+    if (!id || !note) return;
+
+    // 构造更新数据：同时提交元数据 + 结构化字段
+    const updatedStructuredData = note.structuredData
+      ? {
+          ...note.structuredData,
+          summary: formData.summary,
+          keyPoints: toSafeStringArray(formData.keyPoints),
+        }
+      : undefined;
+
+    const safeTags = toSafeStringArray(formData.tags);
 
     updateNote(
       {
         id,
         title: formData.title,
-        content: formData.content,
-        tags: getTagsArray(),
+        category: formData.category,
+        tags: safeTags,
+        structuredData: updatedStructuredData,
       },
       {
         onSuccess: () => {
           finishEditing();
           refetch();
-          // 使用 Toast 替代 Alert（保存成功不需要强制用户操作）
           showSuccess(t("toast.save_success"));
         },
         onError: () => {
-          // 使用 Toast 替代 Alert（保存失败不需要强制用户操作）
           showError(t("toast.save_failed"));
         },
       },
     );
   }, [
     id,
+    note,
     formData,
-    getTagsArray,
     updateNote,
     finishEditing,
     refetch,
@@ -220,7 +254,14 @@ export default function NoteDetailScreen() {
           onPress: () => {
             if (id) {
               deleteNote(id, {
-                onSuccess: () => router.back(),
+                onSuccess: () => {
+                  // 防御：某些入口（深链/冷启动）可能无法 back，此时直接回到首页 Tab。
+                  if (router.canGoBack()) {
+                    router.back();
+                  } else {
+                    router.replace("/(tabs)");
+                  }
+                },
               });
             }
           },
@@ -269,6 +310,20 @@ export default function NoteDetailScreen() {
 
   // 笔记不存在或加载错误
   if (isError || !note) {
+    const serviceError = error instanceof ServiceError ? error : undefined;
+    const isNotFound = serviceError?.statusCode === 404;
+    const isForbidden = serviceError?.statusCode === 403;
+
+    const errorTitle = isNotFound
+      ? t("error.note.notFound")
+      : isForbidden
+        ? t("error.note.forbidden")
+        : t("error.note.loadFailed");
+
+    const errorMessage =
+      serviceError?.message ??
+      (isNotFound ? t("error.note.deletedHint") : t("error.common.unknown"));
+
     return (
       <>
         <Stack.Screen
@@ -285,20 +340,15 @@ export default function NoteDetailScreen() {
             { backgroundColor: theme.colors.background },
           ]}
         >
-          <Ionicons
-            name="document-text-outline"
-            size={64}
-            color={theme.colors.outline}
+          <ErrorScreen
+            title={errorTitle}
+            message={errorMessage}
+            onRetry={isNotFound ? undefined : () => void refetch()}
+            onBack={handleBack}
+            iconName={
+              isNotFound ? "document-text-outline" : "alert-circle-outline"
+            }
           />
-          <Text
-            variant="titleMedium"
-            style={[styles.notFoundText, { color: theme.colors.onSurface }]}
-          >
-            {t("noteDetail.not_found")}
-          </Text>
-          <Button mode="contained" onPress={handleBack} style={styles.backBtn}>
-            {t("noteDetail.back_button")}
-          </Button>
         </View>
       </>
     );
@@ -362,8 +412,8 @@ export default function NoteDetailScreen() {
         contentContainerStyle={styles.contentContainer}
         keyboardShouldPersistTaps="handled"
       >
-        {/* 图片区域 */}
-        <NoteImage imageUrl={note.imageUrl} />
+        {/* 编辑模式：隐藏图片，最大化输入空间 */}
+        {!isEditing && <NoteImage imageUrls={note.imageUrls ?? []} />}
 
         {/* 编辑模式 vs 查看模式 */}
         {isEditing ? (
@@ -427,13 +477,6 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 12,
-  },
-  notFoundText: {
-    marginTop: 16,
-    marginBottom: 24,
-  },
-  backBtn: {
-    marginTop: 8,
   },
   headerRightContainer: {
     flexDirection: "row",

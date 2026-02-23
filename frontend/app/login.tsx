@@ -10,6 +10,7 @@ import {
   useTheme,
 } from "react-native-paper";
 import { useAuth } from "../hooks/useAuth";
+import { ServiceError } from "../types";
 
 export default function LoginScreen() {
   const { t } = useTranslation();
@@ -45,7 +46,7 @@ export default function LoginScreen() {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
       style={[styles.container, { backgroundColor: theme.colors.background }]}
     >
       <View style={styles.formContainer}>
@@ -67,8 +68,18 @@ export default function LoginScreen() {
           onChangeText={setUsername}
           mode="outlined"
           style={styles.input}
+          error={
+            loginError instanceof ServiceError &&
+            !!loginError.fieldErrors?.username
+          }
           left={<TextInput.Icon icon="account" />}
         />
+        {loginError instanceof ServiceError &&
+        !!loginError.fieldErrors?.username ? (
+          <HelperText type="error" visible>
+            {loginError.fieldErrors?.username}
+          </HelperText>
+        ) : null}
 
         {/* Password Input */}
         <TextInput
@@ -77,23 +88,43 @@ export default function LoginScreen() {
           onChangeText={setPassword}
           mode="outlined"
           secureTextEntry={!isPasswordVisible}
+          autoCorrect={false}
+          autoCapitalize="none"
+          spellCheck={false}
+          autoComplete="off"
+          textContentType="none"
+          contextMenuHidden
+          importantForAutofill="noExcludeDescendants"
+          keyboardType="default"
           style={styles.input}
+          error={
+            loginError instanceof ServiceError &&
+            !!loginError.fieldErrors?.password
+          }
           left={<TextInput.Icon icon="lock" />}
           right={
             <TextInput.Icon
-              icon={isPasswordVisible ? "eye-off" : "eye"}
+              icon={isPasswordVisible ? "eye" : "eye-off"}
               onPress={() => setIsPasswordVisible(!isPasswordVisible)}
             />
           }
         />
+        {loginError instanceof ServiceError &&
+        !!loginError.fieldErrors?.password ? (
+          <HelperText type="error" visible>
+            {loginError.fieldErrors?.password}
+          </HelperText>
+        ) : null}
 
         {/* Error Feedback */}
         {loginError ? (
           <HelperText type="error" visible={!!loginError} style={styles.error}>
             {/* 如果 error 是 Error 对象，取 message，实际项目中建议i18n处理后端错误码 */}
-            {loginError instanceof Error
+            {loginError instanceof ServiceError
               ? loginError.message
-              : t("auth.login_failed")}
+              : loginError instanceof Error
+                ? loginError.message
+                : t("auth.login_failed")}
           </HelperText>
         ) : null}
 
@@ -113,7 +144,7 @@ export default function LoginScreen() {
         <Button
           mode="text"
           onPress={() => {
-            router.push("/register");
+            router.replace("/register");
           }}
           style={styles.textButton}
         >

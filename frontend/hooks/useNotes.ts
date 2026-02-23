@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import i18next from "../i18n";
 import { noteService } from "../services/noteService";
 import { useAuthStore } from "../store/useAuthStore";
-import { Note } from "../types";
+import { Note, ServiceError } from "../types";
 import { useToast } from "./useToast";
 
 export const useNotes = () => {
@@ -22,6 +23,15 @@ export const useNotes = () => {
     enabled: isAuthenticated,
     staleTime: 1000 * 60 * 5, // 5分钟内数据视为新鲜
   });
+
+  useEffect(() => {
+    if (!notesQuery.error) return;
+    const errorMessage =
+      notesQuery.error instanceof ServiceError
+        ? notesQuery.error.message
+        : i18next.t("error.note.fetchFailed");
+    showError(errorMessage);
+  }, [notesQuery.error, showError]);
 
   // 1.5 获取单条笔记 (Read Single)
   const useNote = (id: string | null) => {
@@ -56,8 +66,27 @@ export const useNotes = () => {
   // 4. 删除笔记 (Delete)
   const deleteNoteMutation = useMutation({
     mutationFn: noteService.deleteNote,
-    onSuccess: () => {
+    onSuccess: (_, id) => {
+      /**
+       * 重要：这里不要立刻 removeQueries(noteKey)
+       *
+       * 原因：详情页在删除成功后通常会立刻触发 router.back()。
+       * 如果此时把当前正在被详情页观察的 note Query 直接 remove 掉，
+       * React Query 会让详情页瞬间进入“无数据/重新请求”的渲染路径，
+       * 在 Android 的 native-stack (react-native-screens) 返回动画期间，
+       * 可能触发 Fragment/HeaderConfig 的竞态，从而抛出 java.lang.IllegalStateException。
+       *
+       * 处理：仅刷新列表缓存即可；单条详情缓存留给导航卸载后自然回收。
+       */
       queryClient.invalidateQueries({ queryKey: notesKey });
+      showSuccess(i18next.t("toast.delete_success"));
+    },
+    onError: (error) => {
+      showError(
+        error instanceof ServiceError
+          ? error.message
+          : i18next.t("error.note.deleteFailed"),
+      );
     },
   });
 
@@ -101,7 +130,7 @@ export const useNotes = () => {
         queryClient.setQueryData(notesKey, context.previousNotes);
       }
       showError(
-        error instanceof Error
+        error instanceof ServiceError
           ? error.message
           : i18next.t("toast.favorite_failed"),
       );

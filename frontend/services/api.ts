@@ -110,7 +110,9 @@ api.interceptors.request.use(
         config.headers.Authorization = `Bearer ${token}`;
       }
     } catch (error) {
-      console.error("[API] Error fetching token:", error);
+      if (__DEV__) {
+        console.warn("[API] Error fetching token:", error);
+      }
     }
     return config;
   },
@@ -131,7 +133,9 @@ api.interceptors.response.use(
       _retry?: boolean;
     };
 
-    console.error("[API Error]", error.response?.status, error.message);
+    if (__DEV__) {
+      console.log("[API Error]", error.response?.status, error.message);
+    }
 
     // ========================================
     // 401 处理：尝试刷新 Token
@@ -141,8 +145,18 @@ api.interceptors.response.use(
       originalRequest &&
       !originalRequest._retry
     ) {
+      const requestUrl = originalRequest.url ?? "";
+
+      // 登录/注册接口返回 401 时，不应触发 refresh
+      if (
+        requestUrl.includes(ENDPOINTS.AUTH.LOGIN) ||
+        requestUrl.includes(ENDPOINTS.AUTH.REGISTER)
+      ) {
+        return Promise.reject(error);
+      }
+
       // 如果是刷新接口本身返回 401，说明 Token 完全失效，需要重新登录
-      if (originalRequest.url?.includes(ENDPOINTS.AUTH.REFRESH)) {
+      if (requestUrl.includes(ENDPOINTS.AUTH.REFRESH)) {
         console.warn("[API] Refresh token failed, need re-login");
         await tokenService.clearAll();
         authEventEmitter.emit("AUTH_EXPIRED");
@@ -171,7 +185,11 @@ api.interceptors.response.use(
         // 获取当前 Token 用于刷新
         const currentToken = await tokenService.getToken();
         if (!currentToken) {
-          throw new Error("No token available for refresh");
+          // 无 token 说明无法刷新，直接按原始 401 处理
+          onRefreshFailed();
+          isRefreshing = false;
+          authEventEmitter.emit("AUTH_EXPIRED");
+          return Promise.reject(error);
         }
 
         // 直接用 axios 调用刷新接口，避免拦截器循环
@@ -203,7 +221,9 @@ api.interceptors.response.use(
         originalRequest.headers.Authorization = `Bearer ${access_token}`;
         return api(originalRequest);
       } catch (refreshError) {
-        console.error("[API] Token refresh failed:", refreshError);
+        if (__DEV__) {
+          console.warn("[API] Token refresh failed:", refreshError);
+        }
         onRefreshFailed();
         isRefreshing = false;
 

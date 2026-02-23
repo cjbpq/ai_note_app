@@ -11,6 +11,41 @@ import { StyleSheet, View } from "react-native";
 import { Card, Chip, Text, useTheme } from "react-native-paper";
 import { NoteCardProps } from "../types";
 
+/**
+ * 转义正则特殊字符，防止用户输入破坏搜索正则
+ */
+const escapeRegex = (str: string): string =>
+  str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * 将文本按搜索关键词拆分，匹配部分用 primaryContainer 背景高亮
+ * 仅在传入 highlightQuery 时调用，普通场景无性能影响
+ */
+const renderHighlightedText = (
+  text: string,
+  query: string,
+  theme: ReturnType<typeof useTheme>,
+) => {
+  if (!query) return text;
+  const regex = new RegExp(`(${escapeRegex(query)})`, "gi");
+  const parts = text.split(regex);
+  return parts.map((part, i) =>
+    regex.test(part) ? (
+      <Text
+        key={i}
+        style={{
+          backgroundColor: theme.colors.primaryContainer,
+          borderRadius: 2,
+        }}
+      >
+        {part}
+      </Text>
+    ) : (
+      <React.Fragment key={i}>{part}</React.Fragment>
+    ),
+  );
+};
+
 export default function NoteCard({
   title,
   // content,
@@ -18,6 +53,7 @@ export default function NoteCard({
   tags = [],
   imageUrl,
   isFavorite,
+  highlightQuery,
   onPress,
 }: NoteCardProps) {
   const { t } = useTranslation();
@@ -43,6 +79,7 @@ export default function NoteCard({
             transition={200}
             onError={() => setImageError(true)}
           />
+          {/* 有图时：收藏红心叠加在图片右上角 */}
           {isFavorite ? (
             <View
               style={[
@@ -59,9 +96,27 @@ export default function NoteCard({
       <Card.Content
         style={imageUrl && !imageError ? styles.contentWithImage : undefined}
       >
-        <Text variant="titleMedium" style={{ color: theme.colors.onSurface }}>
-          {title}
-        </Text>
+        {/* 无图时：标题行右侧显示收藏红心 */}
+        <View style={styles.titleRow}>
+          <Text
+            variant="titleMedium"
+            style={[styles.titleText, { color: theme.colors.onSurface }]}
+            numberOfLines={2}
+          >
+            {highlightQuery
+              ? renderHighlightedText(title, highlightQuery, theme)
+              : title}
+          </Text>
+          {/* 仅当无图片（或图片加载失败）且已收藏时，在标题旁显示红心 */}
+          {isFavorite && (!imageUrl || imageError) ? (
+            <Ionicons
+              name="heart"
+              size={18}
+              color={theme.colors.error}
+              style={styles.titleFavoriteIcon}
+            />
+          ) : null}
+        </View>
 
         {!!date && (
           <Text
@@ -136,6 +191,19 @@ const styles = StyleSheet.create({
     right: 8,
     borderRadius: 16,
     padding: 4,
+  },
+  // 标题行容器（标题 + 无图时收藏红心）
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  titleText: {
+    flex: 1,
+  },
+  // 无图时标题旁的收藏图标
+  titleFavoriteIcon: {
+    marginLeft: 6,
+    marginTop: 2,
   },
   // 有图片时的内容区域样式
   contentWithImage: {

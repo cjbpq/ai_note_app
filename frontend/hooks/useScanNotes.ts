@@ -1,10 +1,16 @@
+/**
+ * @deprecated 此 Hook 已被 useUploadTasks 替代（多任务并发上传 + 独立轮询）。
+ * 保留此文件仅用于历史参考，后续版本可安全删除。
+ * 新代码请使用 hooks/useUploadTasks.ts。
+ */
+
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import i18n from "../i18n";
 import { noteService } from "../services/noteService";
 import { useScanStore } from "../store/useScanStore";
-import { useToastStore } from "../store/useToastStore";
-import { Note } from "../types";
+import { Note, ServiceError } from "../types";
+import { useToast } from "./useToast";
 
 /**
  * useScanNotes Hook
@@ -25,7 +31,7 @@ import { Note } from "../types";
  */
 export const useScanNotes = () => {
   const queryClient = useQueryClient();
-  const { showToast } = useToastStore();
+  const { showError, showSuccess } = useToast();
 
   // 引入 Zustand Store 管理跨页面的扫描状态
   const {
@@ -50,9 +56,9 @@ export const useScanNotes = () => {
       startScan();
 
       try {
-        // Step B: 上传图片到后端
+        // Step B: 上传图片到后端（传入数组，兼容多图接口）
         console.log("[useScanNotes] Starting upload...");
-        const uploadRes = await noteService.uploadImageNote(imageUri);
+        const uploadRes = await noteService.uploadImageNote([imageUri]);
 
         // Step C: 状态转为处理中
         setScanStep("processing");
@@ -81,10 +87,16 @@ export const useScanNotes = () => {
       // 等用户点击"保存"按钮后，由 confirmAndSave 统一处理
     },
     onError: (error: Error) => {
-      console.error("[useScanNotes] Scan failed:", error);
-      setScanError(error.message || i18n.t("errors.scan_failed"));
+      if (__DEV__) {
+        console.log("[useScanNotes] Scan failed:", error);
+      }
+      const message =
+        error instanceof ServiceError
+          ? error.message
+          : i18n.t("error.upload.failed");
+      setScanError(message);
       // 使用 Toast 替代 Alert（扫描失败不需要强制用户操作）
-      showToast(i18n.t("toast.scan_failed"), "error");
+      showError(message);
     },
   });
 
@@ -103,7 +115,7 @@ export const useScanNotes = () => {
         "[useScanNotes] Note saved to local cache, refreshing list...",
       );
 
-      showToast(i18n.t("toast.save_success"), "success");
+      showSuccess(i18n.t("toast.save_success"));
 
       // 关键：刷新笔记列表缓存，让 read 界面能看到新笔记
       queryClient.invalidateQueries({ queryKey: ["notes"] });
@@ -115,9 +127,15 @@ export const useScanNotes = () => {
       resetScan();
     },
     onError: (error: Error) => {
-      console.error("[useScanNotes] Failed to save note:", error);
+      if (__DEV__) {
+        console.log("[useScanNotes] Failed to save note:", error);
+      }
       // 使用 Toast 替代 Alert（保存失败不需要强制用户操作）
-      showToast(i18n.t("toast.save_failed"), "error");
+      showError(
+        error instanceof ServiceError
+          ? error.message
+          : i18n.t("error.note.saveFailed"),
+      );
     },
   });
 

@@ -12,6 +12,7 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, View } from "react-native";
 import { Chip, Divider, Surface, Text, useTheme } from "react-native-paper";
+import { toSafeStringArray } from "../../utils/safeData";
 
 // ========== Props 类型定义 ==========
 interface NoteMetaInfoProps {
@@ -36,7 +37,8 @@ export const NoteMetaInfo: React.FC<NoteMetaInfoProps> = ({
   const theme = useTheme();
 
   // 如果没有日期、标签和学科，不渲染
-  const hasTags = tags && tags.length > 0;
+  const safeTags = toSafeStringArray(tags);
+  const hasTags = safeTags.length > 0;
   if (!date && !hasTags && !subject) {
     return null;
   }
@@ -92,7 +94,7 @@ export const NoteMetaInfo: React.FC<NoteMetaInfoProps> = ({
             {t("noteDetail.tags_label")}
           </Text>
           <View style={styles.tagsWrap}>
-            {tags.map((tag) => (
+            {safeTags.map((tag) => (
               <Chip
                 key={tag}
                 style={[

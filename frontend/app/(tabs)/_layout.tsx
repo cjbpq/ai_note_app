@@ -5,10 +5,18 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "react-native-paper";
 
+import {
+  selectUnviewedNoteCount,
+  useUploadTaskStore,
+} from "../../store/useUploadTaskStore";
+
 export default function TabLayout() {
   const { t } = useTranslation();
   const theme = useTheme();
   const outlineVariant = theme.colors.outlineVariant ?? theme.colors.outline;
+
+  // 用户尚未点进详情页查看过的新笔记数 → 阅读 Tab 角标
+  const unreadCount = useUploadTaskStore(selectUnviewedNoteCount);
 
   return (
     <Tabs
@@ -40,7 +48,7 @@ export default function TabLayout() {
           ),
         }}
       />
-      {/* 阅读 Tab (笔记列表) */}
+      {/* 阅读 Tab (笔记列表) — 有未读新笔记时显示角标 */}
       <Tabs.Screen
         name="read"
         options={{
@@ -50,6 +58,16 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => (
             <Ionicons name="documents-outline" size={24} color={color} />
           ),
+          // 未读完成数 > 0 时显示角标，否则隐藏
+          tabBarBadge: unreadCount > 0 ? unreadCount : undefined,
+          tabBarBadgeStyle: {
+            backgroundColor: theme.colors.error,
+            color: theme.colors.onError,
+            fontSize: 10,
+            minWidth: 16,
+            height: 16,
+            lineHeight: 16,
+          },
         }}
       />
       {/* 设置 Tab */}

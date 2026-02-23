@@ -11,6 +11,7 @@ import { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { MD3DarkTheme, MD3LightTheme, PaperProvider } from "react-native-paper";
 import { GlobalSnackbar } from "../components/common";
+import { useAndroidSystemNavigationBar } from "../hooks/useAndroidSystemNavigationBar";
 import { useThemeMode } from "../hooks/useThemeMode";
 import "../i18n"; // 初始化国际化配置
 import { authEventEmitter } from "../services/api";
@@ -29,6 +30,9 @@ export default function RootLayout() {
   // 全局主题模式（MVP）：使用 Paper 内置 MD3 Light/Dark
   const { isDark } = useThemeMode();
   const paperTheme = isDark ? MD3DarkTheme : MD3LightTheme;
+
+  // Android 系统导航栏跟随主题，避免 auth 页面出现浅色底栏
+  useAndroidSystemNavigationBar(isDark, paperTheme.colors.background);
 
   // ========================================
   // App 启动初始化
@@ -100,7 +104,11 @@ export default function RootLayout() {
     <QueryClientProvider client={queryClient}>
       <PaperProvider theme={paperTheme}>
         {/* 状态栏随主题切换，避免深色模式下图标不清晰 */}
-        <StatusBar style={isDark ? "light" : "dark"} />
+        <StatusBar
+          style={isDark ? "light" : "dark"}
+          backgroundColor={paperTheme.colors.background}
+          animated
+        />
         <Stack
           // 顶部 Header（例如详情页 note/[id]）跟随主题，避免深色模式下过亮/过暗
           screenOptions={{
@@ -108,14 +116,29 @@ export default function RootLayout() {
             headerTintColor: paperTheme.colors.onSurface,
             headerTitleStyle: { color: paperTheme.colors.onSurface },
             headerShadowVisible: false,
+            contentStyle: { backgroundColor: paperTheme.colors.background },
           }}
         >
           {/* Tab 导航组 - 主要页面 */}
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           {/* 登录页面 */}
-          <Stack.Screen name="login" options={{ headerShown: false }} />
+          <Stack.Screen
+            name="login"
+            options={{
+              headerShown: false,
+              animation: "fade",
+              animationDuration: 200,
+            }}
+          />
           {/* 注册页面 */}
-          <Stack.Screen name="register" options={{ headerShown: false }} />
+          <Stack.Screen
+            name="register"
+            options={{
+              headerShown: false,
+              animation: "fade",
+              animationDuration: 200,
+            }}
+          />
           {/* 笔记详情页面 - 使用动态路由 */}
           <Stack.Screen
             name="note/[id]"
@@ -123,6 +146,14 @@ export default function RootLayout() {
               headerShown: true,
               presentation: "card",
               gestureEnabled: true,
+            }}
+          />
+          {/* 搜索页面 - 全屏 push，无底部 Tab */}
+          <Stack.Screen
+            name="search"
+            options={{
+              headerShown: false,
+              animation: "slide_from_right",
             }}
           />
         </Stack>

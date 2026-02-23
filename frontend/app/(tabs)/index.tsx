@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+﻿import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -7,102 +7,139 @@ import {
   StyleSheet,
   TouchableOpacity,
   View,
-  useWindowDimensions,
 } from "react-native";
 import {
-  ActivityIndicator,
   Button,
-  Card,
-  Modal,
+  Dialog,
+  IconButton,
   Portal,
   Text,
   useTheme,
 } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useImagePicker } from "../../hooks/useImagePicker";
-import { useNotes } from "../../hooks/useNotes";
-import { useScanNotes } from "../../hooks/useScanNotes";
+
+import { CategoryPicker, UploadTaskTray } from "../../components/upload";
+import { useCategories } from "../../hooks/useCategories";
+import { type ImagePickMode, useImagePicker } from "../../hooks/useImagePicker";
+import { useUploadTasks } from "../../hooks/useUploadTasks";
 import { useScanStore } from "../../store/useScanStore";
 
 /**
- * HomeScreen - 首页（拍照/上传界面）
+ * HomeScreen - 首页（拍照/上传界面，支持多图）
  *
- * 数据流向说明：
- * ┌─────────────────────────────────────────────────────────────────────────┐
- * │ 1. 用户选择图片 → pickedImageUri 存入 ScanStore                         │
- * │ 2. 点击上传按钮 → useScanNotes.scanImage() 上传到后端                   │
- * │ 3. 后端处理完成 → 返回 noteId → Modal 显示结果                          │
- * │ 4. 点击保存按钮 → confirmAndSave(note) → 同步到本地 SQLite → 刷新列表   │
- * └─────────────────────────────────────────────────────────────────────────┘
+ * 数据流向说明（多图 + 多任务并发版）：
+ * ┌──────────────────────────────────────────────────────────────────────────┐
+ * │ 1. 用户拍照/选图 → pickedImageUris[] 追加到 ScanStore                   │
+ * │ 2. 点击上传 → useUploadTasks.submitTask(uris[])                         │
+ * │    → 立即 clearImage() → 用户可继续选新一批图片                          │
+ * │ 3. 后台独立轮询每个 job → 完成时自动 sync + 刷新列表 + Snackbar 通知      │
+ * │ 4. 底部任务托盘 <UploadTaskTray> 实时展示各任务状态                       │
+ * └──────────────────────────────────────────────────────────────────────────┘
  */
 export default function HomeScreen() {
   const { t } = useTranslation();
   const theme = useTheme();
-  const { height } = useWindowDimensions();
 
   // =========================================================================
   // 1. Hook 与状态管理
   // =========================================================================
-  const { pickedImageUri } = useScanStore();
-  const { pickImage, clearImage, takePhoto } = useImagePicker();
-
-  // useScanNotes: 管理扫描流程的核心 Hook
+  const { pickedImageUris } = useScanStore();
   const {
-    scanImage,
-    confirmAndSave, // 新增：确认保存方法
-    isScanning,
-    scanStep,
-    scannedNoteId,
-    resetScan,
-    isSaving, // 新增：保存中状态
-  } = useScanNotes();
+    pickImage,
+    pickImages,
+    clearImage,
+    takePhoto,
+    removeImage,
+    currentCount,
+    maxCount,
+    isAtLimit,
+  } = useImagePicker();
+
+  // ── 分类选择 Hook ──
+  const {
+    categories,
+    isLoading: isCategoriesLoading,
+    addLocalCategory,
+  } = useCategories();
+  // 当前选中的分类（null 表示使用默认分类）
+  const [selectedCategory, setSelectedCategory] = React.useState<string | null>(
+    null,
+  );
+
+  // "添加更多图片"来源选择弹层（拍照 / 相册多选 / 相册单选裁剪）
+  const [isAddSourceDialogVisible, setIsAddSourceDialogVisible] =
+    React.useState(false);
+  // 初始空状态时的相册弹层（保留裁剪选项）
+  const [isPickModeDialogVisible, setIsPickModeDialogVisible] =
+    React.useState(false);
+
+  const hasImages = pickedImageUris.length > 0;
+
+  // useUploadTasks: 管理多任务并发上传的核心 Hook
+  const {
+    submitTask,
+    retryTask,
+    removeTask,
+    markAsRead,
+    clearFinished,
+    tasks,
+  } = useUploadTasks();
 
   // =========================================================================
-  // 2. 获取扫描结果 - 通过 Hook 获取数据
-  // =========================================================================
-  const { useNote } = useNotes();
-  const { data: resultNote, isLoading: isFetchingResult } =
-    useNote(scannedNoteId);
-
-  const summaryText = resultNote?.structuredData?.summary ?? "";
-  const modalContentMaxHeight = Math.max(220, Math.floor(height * 0.4));
-
-  // =========================================================================
-  // 3. 核心操作：触发上传
+  // 2. 核心操作：提交上传任务（本次选中的所有图片作为一个任务）
   // =========================================================================
   const handleUpload = () => {
-    if (!pickedImageUri) return;
-    scanImage(pickedImageUri);
+    if (!hasImages) return;
+
+    // 提交多图任务（附带选中的分类）→ 立即清除图片 → 用户可继续选下一批
+    submitTask(pickedImageUris, selectedCategory ?? undefined);
+    clearImage();
+    setSelectedCategory(null);
   };
 
   // =========================================================================
-  // 4. 保存笔记 - 关键逻辑
+  // 3. 弹层控制
   // =========================================================================
-  const handleSaveNote = () => {
-    if (!resultNote) return;
 
-    // 调用 Hook 的 confirmAndSave 方法：
-    // - 将笔记同步到本地 SQLite 缓存
-    // - 刷新笔记列表 (invalidateQueries)
-    // - 重置扫描状态并关闭 Modal
-    confirmAndSave(resultNote);
-    clearImage(); // 清除选中的图片
+  /**  添加更多来源弹层 */
+  const openAddSourceDialog = () => setIsAddSourceDialogVisible(true);
+  const closeAddSourceDialog = () => setIsAddSourceDialogVisible(false);
+
+  /** 从添加弹层选择拍照 */
+  const handleAddByCamera = async () => {
+    closeAddSourceDialog();
+    await takePhoto();
   };
 
-  // =========================================================================
-  // 5. 取消/关闭 - 不保存直接关闭
-  // =========================================================================
-  const handleCancel = () => {
-    clearImage(); // 清除本地选图
-    resetScan(); // 重置 Store 状态 (不触发保存)
+  /** 从添加弹层选择相册多选（不裁剪） */
+  const handleAddByAlbumMulti = async () => {
+    closeAddSourceDialog();
+    await pickImages();
   };
 
-  // 计算 Modal 是否可见：只有当有 noteId 时才尝试显示
-  const isModalVisible = !!scannedNoteId;
+  /** 从添加弹层选择相册单选（可裁剪） */
+  const handleAddByAlbumSingle = async () => {
+    closeAddSourceDialog();
+    await pickImage("crop");
+  };
+
+  /** 初始状态 - 相册模式选择弹层 */
+  const openPickModeDialog = () => setIsPickModeDialogVisible(true);
+  const closePickModeDialog = () => setIsPickModeDialogVisible(false);
+
+  const handlePickWithMode = async (mode: ImagePickMode) => {
+    closePickModeDialog();
+    if (mode === "original") {
+      // 原图 → 多选
+      await pickImages();
+    } else {
+      // 裁剪 → 单选
+      await pickImage(mode);
+    }
+  };
 
   return (
     <SafeAreaView
-      // 使用安全区，避免 Header 移除后内容顶到状态栏/刘海
       style={[styles.safeArea, { backgroundColor: theme.colors.background }]}
       edges={["top"]}
     >
@@ -125,39 +162,102 @@ export default function HomeScreen() {
 
         {/* 核心交互区 */}
         <View style={styles.actionContainer}>
-          {/* Loading 状态遮罩 */}
-          {isScanning ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" animating={true} />
-              <Text style={{ marginTop: 20, color: theme.colors.primary }}>
-                {scanStep === "uploading"
-                  ? t("home.step_uploading")
-                  : t("home.step_processing")}
+          {hasImages ? (
+            // ─── 状态 B: 已选图预览网格 ───
+            <View style={styles.previewSection}>
+              {/* 已选计数 */}
+              <Text
+                variant="labelLarge"
+                style={{
+                  color: theme.colors.onSurfaceVariant,
+                  marginBottom: 8,
+                }}
+              >
+                {t("home.selected_count", {
+                  current: currentCount,
+                  max: maxCount,
+                })}
               </Text>
-            </View>
-          ) : pickedImageUri ? (
-            // 状态 B: 已选图预览
-            <View style={styles.previewContainer}>
-              <Image
-                source={{ uri: pickedImageUri }}
-                style={[
-                  styles.previewImage,
-                  { borderColor: theme.colors.outline },
-                ]}
-              />
+
+              {/* 图片网格 + 分类选择器共享滚动区域 */}
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+              >
+                {/* 图片网格 */}
+                <View style={styles.gridContainer}>
+                  {pickedImageUris.map((uri, index) => (
+                    <View key={`${uri}-${index}`} style={styles.gridItem}>
+                      <Image
+                        source={{ uri }}
+                        style={[
+                          styles.gridImage,
+                          { borderColor: theme.colors.outline },
+                        ]}
+                      />
+                      {/* 删除按钮 */}
+                      <IconButton
+                        icon="close-circle"
+                        size={20}
+                        iconColor={theme.colors.error}
+                        style={styles.removeButton}
+                        onPress={() => removeImage(index)}
+                      />
+                    </View>
+                  ))}
+
+                  {/* 添加更多按钮（未达上限时显示） */}
+                  {!isAtLimit && (
+                    <TouchableOpacity
+                      style={[
+                        styles.addMoreButton,
+                        {
+                          borderColor: theme.colors.outline,
+                          backgroundColor: theme.colors.surfaceVariant,
+                        },
+                      ]}
+                      onPress={openAddSourceDialog}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons
+                        name="add"
+                        size={32}
+                        color={theme.colors.onSurfaceVariant}
+                      />
+                      <Text
+                        variant="labelSmall"
+                        style={{ color: theme.colors.onSurfaceVariant }}
+                      >
+                        {t("home.add_more")}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+
+                {/* 分类选择器：放在滚动区域内避免展开时压缩预览图 */}
+                <CategoryPicker
+                  categories={categories}
+                  selectedCategory={selectedCategory}
+                  onSelect={setSelectedCategory}
+                  onCreateNew={addLocalCategory}
+                  isLoading={isCategoriesLoading}
+                />
+              </ScrollView>
+
+              {/* 操作栏：清空全部 */}
               <View style={styles.previewActions}>
                 <Button
                   mode="text"
                   onPress={clearImage}
                   textColor={theme.colors.error}
-                  disabled={isScanning}
+                  compact
                 >
-                  {t("home.repick_button")}
+                  {t("home.clear_all")}
                 </Button>
               </View>
             </View>
           ) : (
-            // 状态 A: 拍照主按钮 + 相册次级入口
+            // ─── 状态 A: 拍照主按钮 + 相册次级入口 ───
             <View style={styles.pickContainer}>
               {/* 主按钮：拍照 */}
               <TouchableOpacity
@@ -166,11 +266,10 @@ export default function HomeScreen() {
                   {
                     backgroundColor: theme.colors.primaryContainer,
                     borderColor: theme.colors.primary,
-                    // iOS 阴影颜色使用主题色（避免硬编码 #000）
                     shadowColor: theme.colors.shadow,
                   },
                 ]}
-                onPress={takePhoto}
+                onPress={() => takePhoto()}
                 activeOpacity={0.7}
               >
                 <Ionicons
@@ -194,7 +293,7 @@ export default function HomeScreen() {
               <Button
                 mode="text"
                 icon="image-multiple"
-                onPress={pickImage}
+                onPress={openPickModeDialog}
                 style={styles.albumButton}
                 labelStyle={{ fontSize: 14 }}
               >
@@ -204,9 +303,10 @@ export default function HomeScreen() {
           )}
         </View>
 
-        {/* 底部操作区 */}
+        {/* 底部区域：上传按钮 + 任务托盘 */}
         <View style={styles.footer}>
-          {pickedImageUri && !isScanning && !scannedNoteId && (
+          {/* 上传按钮：仅在有已选图时显示 */}
+          {hasImages && (
             <Button
               mode="contained"
               onPress={handleUpload}
@@ -215,89 +315,69 @@ export default function HomeScreen() {
               icon="cloud-upload"
             >
               {t("home.upload_button")}
+              {currentCount > 1 ? ` (${currentCount})` : ""}
             </Button>
           )}
+
+          {/* 任务托盘：显示所有上传任务的进度 */}
+          <UploadTaskTray
+            tasks={tasks}
+            onRetry={retryTask}
+            onRemove={removeTask}
+            onMarkAsRead={markAsRead}
+            onClearFinished={clearFinished}
+          />
         </View>
 
-        {/* 结果展示卡片：使用 Portal + Modal */}
+        {/* ═══════ 弹层：添加更多图片来源 ═══════ */}
         <Portal>
-          <Modal
-            visible={isModalVisible}
-            onDismiss={handleCancel}
-            dismissable={false}
-            contentContainerStyle={[
-              styles.modalContainer,
-              { backgroundColor: theme.colors.surface },
-            ]}
+          <Dialog
+            visible={isAddSourceDialogVisible}
+            onDismiss={closeAddSourceDialog}
           >
-            {isFetchingResult || !resultNote ? (
-              // 正在加载笔记详情
-              <View style={{ alignItems: "center", padding: 20 }}>
-                <ActivityIndicator animating={true} />
-                <Text style={{ marginTop: 10 }}>
-                  {t("home.loading_result")}
-                </Text>
-              </View>
-            ) : (
-              // 显示识别结果
-              <>
-                <Text variant="headlineSmall" style={{ marginBottom: 16 }}>
-                  {t("home.result_title")}
-                </Text>
-                <Text
-                  variant="bodySmall"
-                  style={{
-                    color: theme.colors.onSurfaceVariant,
-                    marginBottom: 8,
-                  }}
-                >
-                  {t("home.result_hint")}
-                </Text>
-                <Card mode="outlined">
-                  <Card.Title
-                    title={resultNote.title}
-                    titleVariant="titleMedium"
-                  />
-                  <Card.Content>
-                    <Text
-                      variant="labelMedium"
-                      style={{ color: theme.colors.primary, marginBottom: 6 }}
-                    >
-                      {t("home.result_summary_title")}
-                    </Text>
-                    {/* 限制预览高度，避免内容过长导致操作按钮不可见 */}
-                    <ScrollView
-                      style={[
-                        styles.resultContent,
-                        { maxHeight: modalContentMaxHeight },
-                      ]}
-                      showsVerticalScrollIndicator={true}
-                    >
-                      <Text
-                        variant="bodyMedium"
-                        style={{ color: theme.colors.onSurface }}
-                      >
-                        {summaryText || t("home.result_no_summary")}
-                      </Text>
-                    </ScrollView>
-                  </Card.Content>
-                </Card>
+            <Dialog.Title>{t("home.add_source_title")}</Dialog.Title>
+            <Dialog.Content>
+              <Text variant="bodyMedium">{t("home.add_source_subtitle")}</Text>
+            </Dialog.Content>
+            <Dialog.Actions>
+              <Button onPress={closeAddSourceDialog}>
+                {t("common.cancel")}
+              </Button>
+              <Button onPress={handleAddByCamera} icon="camera">
+                {t("home.take_photo")}
+              </Button>
+              <Button onPress={handleAddByAlbumMulti} icon="image-multiple">
+                {t("home.album_multi_select")}
+              </Button>
+            </Dialog.Actions>
+          </Dialog>
+        </Portal>
 
-                {/* 操作按钮区 */}
-                <View style={styles.modalActions}>
-                  <Button
-                    mode="contained"
-                    onPress={handleSaveNote}
-                    style={styles.saveButton}
-                    loading={isSaving}
-                    disabled={isSaving}
-                  >
-                    {t("home.save_button")}
-                  </Button>
-                </View>
-              </>
-            )}
-          </Modal>
+        {/* ═══════ 弹层：初始相册模式选择 ═══════ */}
+        <Portal>
+          <Dialog
+            visible={isPickModeDialogVisible}
+            onDismiss={closePickModeDialog}
+          >
+            <Dialog.Title>{t("home.pick_mode_title")}</Dialog.Title>
+            <Dialog.Content>
+              <Text variant="bodyMedium">{t("home.pick_mode_subtitle")}</Text>
+            </Dialog.Content>
+            <Dialog.Actions>
+              <Button onPress={closePickModeDialog}>
+                {t("common.cancel")}
+              </Button>
+              <Button onPress={() => handlePickWithMode("original")}>
+                {t("home.pick_mode_original")}
+              </Button>
+              <Button
+                mode="contained"
+                onPress={() => handlePickWithMode("crop")}
+              >
+                {t("home.pick_mode_free_crop")}
+              </Button>
+            </Dialog.Actions>
+          </Dialog>
         </Portal>
       </View>
     </SafeAreaView>
@@ -313,78 +393,82 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   header: {
-    // 顶层 Header 移除后，减少额外顶部空白
     marginTop: 12,
     alignItems: "center",
   },
   actionContainer: {
     flex: 1,
-    justifyContent: "center", // 垂直居中
-    alignItems: "center", // 水平居中
-  },
-  loadingContainer: {
-    alignItems: "center",
     justifyContent: "center",
+    alignItems: "center",
   },
+  // ─── 状态 A：初始选图 ───
   cameraButton: {
     width: 200,
     height: 200,
-    borderRadius: 100, // 圆形
+    borderRadius: 100,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
-    borderStyle: "dashed", // 虚线边框增加设计感
-    elevation: 4, // Android 投影
+    borderStyle: "dashed",
+    elevation: 4,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
   },
-  // 拍照 + 相册选择的整体容器
   pickContainer: {
     alignItems: "center",
   },
-  // "从相册选择" 次级按钮，放在主圆形按钮下方
   albumButton: {
     marginTop: 20,
   },
-  previewContainer: {
-    alignItems: "center",
+  // ─── 状态 B：多图预览网格 ───
+  previewSection: {
+    flex: 1,
     width: "100%",
+    marginTop: 12,
   },
-  previewImage: {
-    width: 280,
-    height: 280,
-    borderRadius: 16,
+  gridContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    paddingBottom: 16,
+  },
+  gridItem: {
+    position: "relative",
+  },
+  gridImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 12,
     borderWidth: 1,
-    marginBottom: 16,
+  },
+  removeButton: {
+    position: "absolute",
+    top: -8,
+    right: -8,
+    margin: 0,
+  },
+  addMoreButton: {
+    width: 100,
+    height: 100,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 4,
   },
   previewActions: {
     flexDirection: "row",
-    gap: 16,
+    justifyContent: "center",
+    marginTop: 4,
   },
+  // ─── 底部 ───
   footer: {
-    marginBottom: 20,
-    height: 60, // 占位防止跳动
+    marginBottom: 12,
   },
   uploadButton: {
-    borderRadius: 30, // 圆角按钮
-  },
-  modalContainer: {
-    padding: 20,
-    margin: 20,
-    borderRadius: 12,
-  },
-  resultContent: {
-    paddingBottom: 4,
-  },
-  // 新增：Modal 内的按钮区样式
-  modalActions: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    marginTop: 20,
-    gap: 12,
-  },
-  saveButton: {
-    flex: 1,
+    borderRadius: 30,
+    marginBottom: 12,
   },
 });

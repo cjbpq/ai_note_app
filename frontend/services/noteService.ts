@@ -1,4 +1,3 @@
-import { AxiosError } from "axios";
 import { Platform } from "react-native";
 import { APP_CONFIG, ENDPOINTS } from "../constants/config";
 import i18next from "../i18n";
@@ -8,10 +7,15 @@ import {
   NotesAPIResponse,
   RawNoteFromAPI,
   RawSmartNoteData,
+  ServiceError,
   SmartNoteData,
   SmartNoteMeta,
   UploadResponse,
 } from "../types";
+import {
+  toOptionalSafeSections,
+  toOptionalSafeStringArray,
+} from "../utils/safeData";
 import api from "./api";
 import {
   deleteNoteLocally,
@@ -20,6 +24,7 @@ import {
   saveNoteLocally,
   saveNotesToLocal,
 } from "./database";
+import { parseServiceError } from "./errorService";
 
 // ============================================================================
 // 字段规范化工具函数
@@ -49,14 +54,17 @@ const normalizeStructuredData = (
     return undefined;
   }
 
+  const keyPoints = toOptionalSafeStringArray(data.key_points);
+  const sections = toOptionalSafeSections(data.sections);
+
   // 转换 meta 对象
   let meta: SmartNoteMeta | undefined;
   if (data.meta && typeof data.meta === "object") {
     meta = {
       subject: data.meta.subject,
       promptProfile: data.meta.prompt_profile,
-      warnings: data.meta.warnings,
-      tags: data.meta.tags,
+      warnings: toOptionalSafeStringArray(data.meta.warnings),
+      tags: toOptionalSafeStringArray(data.meta.tags),
       originalNoteType: data.meta.original_note_type,
       provider: data.meta.provider,
       // 故意不映射 meta.response — 体积大且前端不需要
@@ -67,8 +75,8 @@ const normalizeStructuredData = (
     title: data.title,
     summary: data.summary,
     rawText: data.raw_text,
-    sections: data.sections, // 内部字段 heading/content 无需转换
-    keyPoints: data.key_points,
+    sections,
+    keyPoints,
     studyAdvice: data.study_advice,
     meta,
   };
@@ -83,9 +91,9 @@ const normalizeStructuredData = (
  * | original_text      | content           |
  * | created_at         | date              |
  * | updated_at         | updatedAt         |
- * | image_url          | imageUrl          |
- * | image_filename     | imageFilename     |
- * | image_size         | imageSize         |
+ * | image_urls         | imageUrls         |
+ * | image_filenames    | imageFilenames    |
+ * | image_sizes        | imageSizes        |
  * | is_favorite        | isFavorite        |
  * | is_archived        | isArchived        |
  * | user_id            | userId            |
@@ -115,11 +123,38 @@ const normalizeNote = (raw: RawNoteFromAPI): Note => {
     }
   }
 
-  // 图片 URL：相对路径拼接完整地址
-  let imageUrl = raw.imageUrl || raw.image_url;
-  if (imageUrl && imageUrl.startsWith("/")) {
-    imageUrl = `${APP_CONFIG.STATIC_BASE_URL}${imageUrl}`;
+  // 图片 URL：新后端返回 image_urls 数组，兼容旧单值字段
+  // 相对路径拼接完整地址
+  let imageUrls: string[] = [];
+  if (Array.isArray(raw.image_urls) && raw.image_urls.length > 0) {
+    // 新后端格式：image_urls 数组
+    imageUrls = raw.image_urls.map((url) =>
+      url.startsWith("/") ? `${APP_CONFIG.STATIC_BASE_URL}${url}` : url,
+    );
+  } else {
+    // 兼容旧后端：单值 image_url / imageUrl 回退
+    const legacyUrl = raw.image_url ?? raw.imageUrl;
+    if (legacyUrl) {
+      const fullUrl = legacyUrl.startsWith("/")
+        ? `${APP_CONFIG.STATIC_BASE_URL}${legacyUrl}`
+        : legacyUrl;
+      imageUrls = [fullUrl];
+    }
   }
+
+  // 图片文件名：新后端 image_filenames 数组，兼容旧 image_filename 单值
+  const imageFilenames: string[] = Array.isArray(raw.image_filenames)
+    ? raw.image_filenames
+    : raw.image_filename
+      ? [raw.image_filename]
+      : [];
+
+  // 图片大小：新后端 image_sizes 数组，兼容旧 image_size 单值
+  const imageSizes: number[] = Array.isArray(raw.image_sizes)
+    ? raw.image_sizes
+    : raw.image_size != null
+      ? [raw.image_size]
+      : [];
 
   // 结构化数据：深度 snake_case → camelCase 转换
   const rawStructured = raw.structured_data || raw.structuredData;
@@ -134,9 +169,9 @@ const normalizeNote = (raw: RawNoteFromAPI): Note => {
     date,
     updatedAt: raw.updated_at,
     tags,
-    imageUrl,
-    imageFilename: raw.image_filename,
-    imageSize: raw.image_size,
+    imageUrls,
+    imageFilenames,
+    imageSizes,
     category,
     isFavorite: raw.is_favorite ?? false,
     isArchived: raw.is_archived ?? false,
@@ -240,6 +275,9 @@ const MOCK_NOTES: Note[] = [
       "Content displayed when no backend connection. You can disable MOCK mode in .env.",
     date: new Date().toISOString(),
     tags: ["mock", "demo"],
+    imageUrls: [],
+    imageFilenames: [],
+    imageSizes: [],
   },
   {
     id: "2",
@@ -247,6 +285,9 @@ const MOCK_NOTES: Note[] = [
     content: "Expo is convenient, especially routing and auto-build.",
     date: new Date(Date.now() - 86400000).toISOString(),
     tags: ["learning"],
+    imageUrls: [],
+    imageFilenames: [],
+    imageSizes: [],
   },
 ];
 
@@ -261,35 +302,6 @@ const addMockNote = (note: Note) => {
 };
 
 const USE_MOCK = process.env.EXPO_PUBLIC_USE_MOCK === "true";
-
-/**
- * 提取后端错误信息，优先使用 detail.msg，避免 UI 处理 axios 细节
- */
-const extractApiErrorMessage = (
-  error: unknown,
-  fallbackKey: string,
-): string => {
-  if (error instanceof AxiosError) {
-    const data = error.response?.data as any;
-    if (Array.isArray(data?.detail) && data.detail.length > 0) {
-      const first = data.detail[0];
-      const msg = first?.msg as string | undefined;
-      const loc = Array.isArray(first?.loc) ? first.loc.join(".") : undefined;
-      if (msg) {
-        return loc ? `${loc}: ${msg}` : msg;
-      }
-    }
-    if (typeof data?.message === "string") {
-      return data.message;
-    }
-  }
-
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return i18next.t(fallbackKey);
-};
 
 // ============================================================================
 // Service Implementation
@@ -324,6 +336,9 @@ export const noteService = {
             "这是从图片中提取的文字内容：\n\n1. 关键公式 E=mc²\n2. 历史背景...\n\n(此为 Mock 数据)",
           date: new Date().toISOString(),
           tags: ["AI", "识别"],
+          imageUrls: [],
+          imageFilenames: [],
+          imageSizes: [],
         };
       }
       return MOCK_NOTES.find((n) => n.id === id);
@@ -405,22 +420,36 @@ export const noteService = {
         content: "Detailed content for mock note...",
         date: new Date().toISOString(),
         tags: ["mock-detail"],
+        imageUrls: [],
+        imageFilenames: [],
+        imageSizes: [],
       };
     }
 
     // 真实 API：获取并规范化
-    const response = await api.get<RawNoteFromAPI>(
-      `${ENDPOINTS.LIBRARY.GET_NOTE}/${noteId}`,
-    );
-    const rawNote = response as unknown as RawNoteFromAPI;
-    const note = normalizeNote(rawNote);
+    try {
+      const response = await api.get<RawNoteFromAPI>(
+        `${ENDPOINTS.LIBRARY.GET_NOTE}/${noteId}`,
+      );
+      const rawNote = response as unknown as RawNoteFromAPI;
+      const note = normalizeNote(rawNote);
 
-    // 获取单条详情成功后，也更新本地缓存，确保离线可用
-    saveNoteLocally(note).catch((err: unknown) =>
-      console.warn("Save note locally failed:", err),
-    );
+      // 获取单条详情成功后，也更新本地缓存，确保离线可用
+      saveNoteLocally(note).catch((err: unknown) =>
+        console.warn("Save note locally failed:", err),
+      );
 
-    return note;
+      return note;
+    } catch (error) {
+      throw parseServiceError(error, {
+        fallbackKey: "error.note.loadFailed",
+        statusMap: {
+          403: { key: "error.note.forbidden", toastType: "error" },
+          404: { key: "error.note.notFound", toastType: "error" },
+          422: { key: "error.validation.invalid", toastType: "warning" },
+        },
+      });
+    }
   },
 
   /**
@@ -440,15 +469,32 @@ export const noteService = {
       return created;
     }
 
-    const response = await api.post<Note>(ENDPOINTS.LIBRARY.GET_NOTE, newNote);
-    const createdNote = response as unknown as Note;
+    try {
+      const response = await api.post<Note>(
+        ENDPOINTS.LIBRARY.GET_NOTE,
+        newNote,
+      );
+      const createdNote = response as unknown as Note;
 
-    // 成功后同步保存到本地
-    saveNoteLocally(createdNote).catch((err: unknown) =>
-      console.warn("Save local failed:", err),
-    );
+      // 成功后同步保存到本地
+      saveNoteLocally(createdNote).catch((err: unknown) =>
+        console.warn("Save local failed:", err),
+      );
 
-    return createdNote;
+      return createdNote;
+    } catch (error) {
+      throw parseServiceError(error, {
+        fallbackKey: "error.note.createFailed",
+        statusMap: {
+          422: { key: "error.validation.invalid", toastType: "warning" },
+          429: {
+            key: "error.common.rateLimited",
+            toastType: "warning",
+            retryable: true,
+          },
+        },
+      });
+    }
   },
 
   /**
@@ -479,7 +525,13 @@ export const noteService = {
           console.warn("Rollback local failed:", err),
         );
       }
-      throw error;
+      throw parseServiceError(error, {
+        fallbackKey: "error.note.deleteFailed",
+        statusMap: {
+          404: { key: "error.note.notFound", toastType: "error" },
+          403: { key: "error.note.forbidden", toastType: "error" },
+        },
+      });
     }
   },
 
@@ -502,21 +554,32 @@ export const noteService = {
     const apiPayload = toAPIFormat(updatedNote);
     console.log("[Service] updateNote API payload:", apiPayload);
 
-    const response = await api.put<RawNoteFromAPI>(
-      `${ENDPOINTS.LIBRARY.GET_NOTE}/${id}`,
-      apiPayload,
-    );
+    try {
+      const response = await api.put<RawNoteFromAPI>(
+        `${ENDPOINTS.LIBRARY.GET_NOTE}/${id}`,
+        apiPayload,
+      );
 
-    // 规范化后端返回的数据
-    const rawNote = response as unknown as RawNoteFromAPI;
-    const finalNote = normalizeNote(rawNote);
+      // 规范化后端返回的数据
+      const rawNote = response as unknown as RawNoteFromAPI;
+      const finalNote = normalizeNote(rawNote);
 
-    // 成功后更新本地
-    saveNoteLocally(finalNote).catch((err: unknown) =>
-      console.warn("Update local failed:", err),
-    );
+      // 成功后更新本地
+      saveNoteLocally(finalNote).catch((err: unknown) =>
+        console.warn("Update local failed:", err),
+      );
 
-    return finalNote;
+      return finalNote;
+    } catch (error) {
+      throw parseServiceError(error, {
+        fallbackKey: "error.note.updateFailed",
+        statusMap: {
+          404: { key: "error.note.notFound", toastType: "error" },
+          403: { key: "error.note.forbidden", toastType: "error" },
+          422: { key: "error.validation.invalid", toastType: "warning" },
+        },
+      });
+    }
   },
 
   /**
@@ -547,7 +610,13 @@ export const noteService = {
       );
       return finalNote;
     } catch (error) {
-      throw new Error(extractApiErrorMessage(error, "service.favorite_failed"));
+      throw parseServiceError(error, {
+        fallbackKey: "error.note.favoriteFailed",
+        statusMap: {
+          404: { key: "error.note.notFound", toastType: "error" },
+          403: { key: "error.note.forbidden", toastType: "error" },
+        },
+      });
     }
   },
 
@@ -578,15 +647,16 @@ export const noteService = {
 
   /**
    * 上传图片生成笔记 (Scene 1)
-   * @param imageUri 图片本地URI
+   * 支持单张或多张图片上传 —— 后端 "files" 字段接收多文件
+   * @param imageUris 图片本地 URI 数组（至少 1 张）
    * @param noteType 笔记类型
    */
   uploadImageNote: async (
-    imageUri: string,
+    imageUris: string[],
     noteType: string = "学习笔记",
   ): Promise<UploadResponse> => {
     if (USE_MOCK) {
-      console.log("[Mock API] uploadImageNote called", imageUri, noteType);
+      console.log("[Mock API] uploadImageNote called", imageUris, noteType);
       await new Promise((resolve) => setTimeout(resolve, 1500));
       return {
         job_id: "mock-job-" + Date.now().toString(),
@@ -597,34 +667,59 @@ export const noteService = {
 
     const formData = new FormData();
 
-    if (Platform.OS === "web") {
-      // Web 环境下，需要将 URI 转换为 Blob 上传
-      const response = await fetch(imageUri);
-      const blob = await response.blob();
-      formData.append("file", blob, "upload.jpg");
-    } else {
-      // React Native 环境下，直接构造文件对象
-      // @ts-ignore: React Native FormData append supports object for file
-      formData.append("file", {
-        uri: imageUri,
-        name: "upload.jpg",
-        type: "image/jpeg",
-      });
+    // 逐张追加到同一个 "files" 字段（后端按 multipart 接收多文件）
+    for (let i = 0; i < imageUris.length; i++) {
+      const uri = imageUris[i];
+      const filename = `upload_${i}.jpg`;
+
+      if (Platform.OS === "web") {
+        const response = await fetch(uri);
+        const blob = await response.blob();
+        formData.append("files", blob, filename);
+      } else {
+        // @ts-ignore: React Native FormData append supports object for file
+        formData.append("files", {
+          uri,
+          name: filename,
+          type: "image/jpeg",
+        });
+      }
     }
 
     formData.append("note_type", noteType);
 
-    const response = await api.post<UploadResponse>(
-      ENDPOINTS.LIBRARY.UPLOAD_IMAGE,
-      formData,
-      {
-        headers: {
-          "Content-Type": "multipart/form-data",
+    try {
+      const response = await api.post<UploadResponse>(
+        ENDPOINTS.LIBRARY.UPLOAD_IMAGE,
+        formData,
+        {
+          headers: {
+            "Content-Type": "multipart/form-data",
+          },
+          transformRequest: (data) => data,
         },
-        transformRequest: (data) => data,
-      },
-    );
-    return response as unknown as UploadResponse;
+      );
+      return response as unknown as UploadResponse;
+    } catch (error) {
+      throw parseServiceError(error, {
+        fallbackKey: "error.upload.failed",
+        statusMap: {
+          400: { key: "error.upload.invalidFile", toastType: "warning" },
+          401: { key: "error.auth.unauthorized", toastType: "info" },
+          422: { key: "error.validation.invalid", toastType: "warning" },
+          429: {
+            key: "error.common.rateLimited",
+            toastType: "warning",
+            retryable: true,
+          },
+          500: {
+            key: "error.server.unavailable",
+            toastType: "error",
+            retryable: true,
+          },
+        },
+      });
+    }
   },
 
   /**
@@ -650,6 +745,9 @@ export const noteService = {
           content: `这是模拟 AI 识别生成的笔记内容。\n\n任务 ID: ${jobId}\n生成时间: ${new Date().toLocaleString()}`,
           date: new Date().toISOString(),
           tags: ["AI", "扫描"],
+          imageUrls: [],
+          imageFilenames: [],
+          imageSizes: [],
         });
 
         return { status: "completed", note_id: noteId };
@@ -660,19 +758,30 @@ export const noteService = {
       }
     }
 
-    const response = (await api.get<{
-      status?: string;
-      note_id?: string;
-      id?: string;
-    }>(`${ENDPOINTS.UPLOAD.GET_JOB}/${jobId}`)) as unknown as {
-      status?: string;
-      note_id?: string;
-      id?: string;
-    };
-    return {
-      status: noteService.normalizeJobStatus(response?.status),
-      note_id: response?.note_id,
-    };
+    try {
+      const response = (await api.get<{
+        status?: string;
+        note_id?: string;
+        id?: string;
+      }>(`${ENDPOINTS.UPLOAD.GET_JOB}/${jobId}`)) as unknown as {
+        status?: string;
+        note_id?: string;
+        id?: string;
+      };
+      return {
+        status: noteService.normalizeJobStatus(response?.status),
+        note_id: response?.note_id,
+      };
+    } catch (error) {
+      throw parseServiceError(error, {
+        fallbackKey: "error.upload.jobStatusFailed",
+        statusMap: {
+          403: { key: "error.upload.jobForbidden", toastType: "error" },
+          404: { key: "error.upload.jobNotFound", toastType: "error" },
+          422: { key: "error.validation.invalid", toastType: "warning" },
+        },
+      });
+    }
   },
 
   /**
@@ -703,7 +812,12 @@ export const noteService = {
           return result.note_id;
         }
         if (result.status === "failed") {
-          throw new Error(i18next.t("service.job_failed"));
+          throw new ServiceError({
+            message: i18next.t("error.upload.jobFailed"),
+            i18nKey: "error.upload.jobFailed",
+            toastType: "error",
+            retryable: true,
+          });
         }
       } catch (error) {
         console.warn("轮询出错:", error);
@@ -712,6 +826,11 @@ export const noteService = {
       await new Promise((r) => setTimeout(r, APP_CONFIG.JOB_POLL_INTERVAL));
       retries++;
     }
-    throw new Error(i18next.t("service.job_timeout"));
+    throw new ServiceError({
+      message: i18next.t("error.upload.jobTimeout"),
+      i18nKey: "error.upload.jobTimeout",
+      toastType: "error",
+      retryable: true,
+    });
   },
 };
