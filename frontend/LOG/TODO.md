@@ -30,16 +30,13 @@
 
 **收集调试过程中的即使bug/新增功能**
 
-- [x] **分类本地缓存账号隔离止血**：`local_new_categories` 改为 `local_new_categories_{userId}`，并清理历史全局 key ✅ 2026-02-25
-- [x] **搜索历史本地缓存账号隔离止血**：`search_history` 改为 `search_history_{userId}`，并清理历史全局 key ✅ 2026-02-25
+- [x] **分类及搜索记录本地缓存账号隔离止血**：`local_new_categories` 改为 `local_new_categories_{userId}`，`search_history` 改为 `search_history_{userId}`，并清理历史全局 key ✅ 2026-02-25
 
 - [ ] **后端分类系统协同设计**：输出分类 CRUD 最小接口合同（字段、错误码、前端 i18n 映射、迁移策略）
 
 - [ ] **useScanNotes 清理**：已标记 @deprecated，确认无回归风险后可安全删除
 - [ ] **UX bug**:当用户上传单张从相册选择的手机完整截屏后，默认全屏裁剪导致无法正常裁剪
 - [ ] **Toast 队列优化**: 评估高频触发时的消息堆积问题，考虑为 Error 消息增加时长或优先级。
-
-
 
 ------------------------------------分隔线---------------------------------------------------------
 
