@@ -2,43 +2,43 @@
 
 > 记录项目的核心变更、架构决策与每日进展。
 
-## 📅 2026-02-24 | 分类系统 MVP 全流程开发
+## 📅 2026-02-24 | 多图适配、本地搜索升级与分类系统 MVP
 
-### 1. 功能与交付
+### 🚀 功能与交付
 
-- **分类系统三屏联动**：上传页 CategoryPicker（选/建分类）、阅读页 CategoryDrawer（侧边栏筛选）、搜索页筛选增强（可折叠+Badge+FilterSummaryBar）。
-- **共享数据层建设**：categoryService + useCategories Hook + noteFilters 工具函数，三屏共享同一数据源。
-- **i18n 补全**：新增 ~25 个中英文 key，覆盖分类选择/Drawer/搜索/错误提示全场景。
+- **后端多图功能扩展**：图片字段数组化全流程适配，修复收藏红心 Bug。
+- **多图上传 & 展示 UI 迭代**：实现首页多图网格预览、笔记详情轮播及全屏查看器（带 pinch-to-zoom），支持相册多选。
+- **新增本地搜索历史记录**：记录用户点击的搜索结果笔记标题，集成至搜索空闲页。
+- **搜索功能前端升级（本地搜索）**：移除后端搜索 API，改为消费 `useNotes` 缓存做内存过滤（JS Pipeline），简化状态机。
+- **分类系统 MVP 全流程开发**：实现纯后端聚合策略与本地缓存新建分类，集成阅读页 Drawer 筛选与搜索页筛选联动。
 
-### 2. 关键决策
+### 🧠 关键决策
 
-- **数据策略**：纯后端聚合（GET /categories 返回去重分类名）+ 本地 AsyncStorage 暂存新建分类；无独立"创建分类" API，分类随笔记上传隐式创建。
-- **Drawer 方案**：react-native-drawer-layout（轻量，无 react-native-gesture-handler/reanimated 额外依赖）。
-- **筛选工具共享**：从 useSearch.ts 抽取 ~100 行 extractCategories/extractTags/filterNotes 到 utils/noteFilters.ts，search + read 共享。
-- **Chip 视觉区分**：分类 Chip 方角(borderRadius:4)、标签 Chip 圆角(borderRadius:16)，增强可识别性。
+- 底层类型全量改为数组，UI 层暂取 `[0]` 单张显示；上传 FormData field 从 `file` 改为 `files`。
+- 采用 FlatList 实现轮播（零依赖）+ `react-native-image-viewing` 全屏查看器；相册多选跳过裁剪、拍照保留裁剪。
+- 搜索历史数据结构采用简单 `string[]`（仅存笔记标题），长标题 UI 层截断。
+- 搜索完全改为本地内存过滤，防抖 600ms→300ms，状态机 6 态简化为 3 态（idle/results/empty）。
+- 分类系统采用纯后端聚合策略 + 本地 AsyncStorage 缓存新建分类；阅读页 Drawer 选用 `react-native-drawer-layout`。
 
-### 3. 架构落点
+### 🏗️ 架构落点
 
-| 层级    | 文件                                  | 职责                                     |
-| ------- | ------------------------------------- | ---------------------------------------- |
-| Service | `categoryService.ts`                  | 后端分类 API + 本地新建分类 CRUD         |
-| Hook    | `useCategories.ts`                    | TanStack Query 合并后端+本地 + noteCount |
-| Utils   | `noteFilters.ts`                      | 纯函数：分类/标签提取 + 过滤 Pipeline    |
-| UI-上传 | `CategoryPicker.tsx` → `index.tsx`    | 可展开下拉 + 新建分类入口                |
-| UI-阅读 | `CategoryDrawer.tsx` → `read.tsx`     | Drawer 侧边栏 + 汉堡菜单 + 副标题        |
-| UI-搜索 | `FilterSummaryBar.tsx` → `search.tsx` | 可折叠筛选 + Badge + 汇总栏              |
+- **Store**: `useScanStore` (pickedImageUris[])。
+- **Service**: `noteService` (normalizeNote 数组适配, uploadImageNote 接收 string[]), `searchHistoryService` (AsyncStorage CRUD), `categoryService` (fetchCategories + 本地新建分类 CRUD)。
+- **Hook**: `useImagePicker` (多选/追加/上限校验), `useSearchHistory` (TanStack Query 包裹), `useSearch` (重写为本地过滤 Pipeline), `useCategories` (合并后端+本地 + noteCount 统计)。
+- **UI**: 新增 `ImageCarousel`, `ImageViewerModal`, `SearchHistory`, `CategoryPicker`, `CategoryDrawer`, `FilterSummaryBar` 等组件；改造 `NoteImage`, `search.tsx`, `index.tsx`, `read.tsx` 等。
+- **Utils**: 抽取 `noteFilters.ts` 共享筛选工具函数。
 
-### 4. 兼容性
+### 📱 兼容性
 
-- 全跨平台，无 Android/iOS 差异。react-native-drawer-layout 官方推荐，Android/iOS 一致。
+- 全跨平台，无 Android/iOS 差异。
 
-### 5. 后续 TODO
+### 📝 后续 TODO
 
-- 真机测试分类全流程（上传 → Drawer 筛选 → 搜索联动）
-- GET /categories API 返回格式真机验证
-- 分类编辑/删除/重命名（需后端支持）
-- Drawer 内收藏夹入口（待收藏系统完善）
-- AI 智能分类推荐
+- 多图 UI 开发（轮播/网格）；多图上传 UI（选取多张照片）。
+- 多图场景大体积优化（expo-image-manipulator 前端压缩）；上传进度百分比。
+- 搜索历史点击后可直接跳转对应笔记（需存 noteId）；历史记录上限可配置化。
+- 搜索页筛选区域 UI 精调；考虑笔记内容搜索（SQLite FTS5）；分类系统完善（自定义分类 / AI 建议分类）。
+- 真机测试分类全流程；GET /categories API 返回格式真机验证；分类编辑/删除/重命名功能；Drawer 内收藏夹入口；分类 Chip 数量过多时的折叠/展开优化；AI 智能分类推荐。
 
 ## 📅 2026-02-22 | 搜索功能全流程打通与体验修复
 

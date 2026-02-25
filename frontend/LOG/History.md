@@ -135,6 +135,65 @@
   - 兼容性：Android 支持自由裁切；iOS 使用系统裁切能力并允许原图直传（存在系统交互差异）
   - 后续迭代：若要求 Android/iOS 完全一致裁切体验，需评估自定义裁切页（开发维护成本更高）
 
+### 2026-02-24 | 多图适配、本地搜索升级与分类系统 MVP
+
+- [x] 接口适配/Bug修复：后端多图功能扩展 — 图片字段数组化全流程适配 + 收藏红心 Bug 修复 ✅ 2026-02-22
+  - 重大决策：底层类型全量改为数组（imageUrls/imageFilenames/imageSizes），UI 层暂取 `[0]` 单张显示；上传 FormData field 从 `file` 改为 `files`
+  - 架构实现：Types(Note/RawNoteFromAPI/JobResponse) → Service(normalizeNote 数组适配+兼容旧字段回退, uploadImageNote field 更名) → Database(v4 schema 重建) → UI(所有图片消费点取 `[0]`)
+  - 涉及文件：`types/index.ts`, `services/noteService.ts`, `services/database.ts`, `hooks/useUploadTasks.ts`, `app/(tabs)/read.tsx`, `app/search.tsx`, `app/note/[id].tsx`, `components/note-card.tsx`
+  - 收藏红心修复：无图片时在标题行右侧显示红心图标，有图时仍叠加在图片右上角
+  - 兼容性：全跨平台，无 Android/iOS 差异
+  - 后续迭代：多图 UI 开发（轮播/网格）；多图上传 UI（选取多张照片）
+
+- [x] 多图上传 & 展示 UI 迭代 ✅ 2026-02-22
+  - 重大决策：FlatList 实现轮播（零依赖）+ react-native-image-viewing 全屏查看器（带 pinch-to-zoom）；相册多选跳过裁剪、拍照保留裁剪
+  - 架构实现：Config(MAX_UPLOAD_COUNT) → Store(pickedImageUris[]) → Hook(useImagePicker 多选/追加/上限校验) → Service(uploadImageNote 接收 string[]) → UI(首页多图网格 + 笔记详情轮播)
+  - 新增组件：`components/common/ImageCarousel.tsx`（可复用轮播）、`components/common/ImageViewerModal.tsx`（全屏查看器）
+  - 改造组件：`components/note/NoteImage.tsx`（单图→多图轮播+全屏）、`app/(tabs)/index.tsx`（多图网格预览+添加更多弹层）
+  - 涉及文件：`types/index.ts`, `constants/config.ts`, `store/useScanStore.ts`, `hooks/useImagePicker.ts`, `hooks/useUploadTasks.ts`, `hooks/useScanNotes.ts`, `services/noteService.ts`, `i18n/zh.ts`, `i18n/en.ts`
+  - 兼容性：全跨平台，无 Android/iOS 差异
+  - 后续迭代：多图场景大体积优化（expo-image-manipulator 前端压缩）；上传进度百分比
+
+- [x] 新增本地搜索历史记录 ✅ 2026-02-23
+  - 重大决策：数据结构采用简单 `string[]`（仅存笔记标题），长标题 UI 层 `numberOfLines=1` 截断；记录时机为用户点击搜索结果笔记卡片时
+  - 架构实现：Config(MAX_SEARCH_HISTORY=10 + STORAGE_KEYS). → Service(searchHistoryService: AsyncStorage CRUD) → Hook(useSearchHistory: TanStack Query 包裹) → UI(SearchHistory 组件 + SearchIdleContent 集成)
+  - 新增文件：`services/searchHistoryService.ts`、`hooks/useSearchHistory.ts`、`components/search/SearchHistory.tsx`
+  - 改造文件：`components/search/SearchIdleContent.tsx`（接入搜索历史 + ScrollView 包裹）、`app/search.tsx`（接入 history hook + 点击笔记记录历史）、`components/search/index.ts`（导出新组件）、`constants/config.ts`、`i18n/zh.ts`、`i18n/en.ts`
+  - 兼容性：全跨平台，无 Android/iOS 差异
+  - 后续迭代：搜索历史点击后可直接跳转对应笔记（需存 noteId）；历史记录上限可配置化
+
+- [x] 搜索功能前端升级（本地搜索） ✅ 2026-02-23
+  - 重大决策：完全移除后端搜索 API，改为消费 useNotes TanStack Query 缓存做内存过滤（JS Pipeline）；防抖 600ms→300ms；状态机 6 态简化为 3 态（idle/results/empty）
+  - 架构实现：Hook(useSearch 重写：useNotes 缓存 → extractCategories/extractTags 动态提取 → filterNotes Pipeline[分类→标签AND→关键词includes→收藏优先+时间倒序]) → UI(search.tsx 筛选 Chips 固定区域始终可见 + 状态机简化 + 暂无笔记/筛选空态) → Service(移除 noteService.searchNotes)
+  - 改造文件：`hooks/useSearch.ts`（全量重写）、`app/search.tsx`（状态机+筛选Chips+active filters）、`components/search/SearchIdleContent.tsx`（移除硬编码分类/标签，简化为历史+引导）、`components/search/SearchEmpty.tsx`（支持filter-only空态）、`services/noteService.ts`（移除searchNotes+清理imports）、`types/index.ts`（SearchState简化）、`constants/config.ts`（debounce 300ms + MAX_TAG_DISPLAY_COUNT）、`i18n/zh.ts`/`i18n/en.ts`（新增6个key）、`components/search/index.ts`（更新注释）
+  - 兼容性：全跨平台，无 Android/iOS 差异
+  - 后续迭代：
+    - [ ] 搜索页筛选区域 UI 精调（分类/标签 Chip 布局优化，当前为 MVP 功能优先）
+    - [ ] 考虑笔记内容搜索（当前仅标题，正文搜索需评估 SQLite FTS5）
+    - [ ] 搜索历史点击可直接跳转对应笔记（需存 noteId）
+    - [ ] 分类系统完善（自定义分类 / AI 建议分类 / 接入 GET /library/categories）
+    - [ ] 骨架屏 SearchSkeleton 和 SearchError 组件保留未删，后续后端深度搜索可复用
+
+- [x] 分类系统 MVP 全流程开发 ✅ 2026-02-24
+  - 重大决策：纯后端聚合策略(GET /categories) + 本地 AsyncStorage 缓存新建分类；阅读页 Drawer 选用 react-native-drawer-layout（轻量无手势库依赖）；筛选工具函数抽取为 utils/noteFilters.ts 共享
+  - 架构实现：
+    - Service: `categoryService.ts`（fetchCategories + 本地新建分类 CRUD）
+    - Hook: `useCategories.ts`（TanStack Query 合并后端+本地 + noteCount 统计）
+    - Utils: `noteFilters.ts`（extractCategories/extractTags/filterNotes/filterNotesByCategory 纯函数）
+    - UI-上传: `CategoryPicker.tsx`（可展开下拉选择器 + 新建分类入口）→ 集成至 `app/(tabs)/index.tsx`
+    - UI-阅读: `CategoryDrawer.tsx`（侧边栏分类列表+系统分类）→ 集成至 `app/(tabs)/read.tsx`（Drawer 包裹 + 汉堡菜单）
+    - UI-搜索: `FilterSummaryBar.tsx`（已选筛选汇总栏）→ 集成至 `app/search.tsx`（可折叠筛选区+Badge+视觉区分）
+  - 涉及文件（新建）：`services/categoryService.ts`, `hooks/useCategories.ts`, `utils/noteFilters.ts`, `components/upload/CategoryPicker.tsx`, `components/read/CategoryDrawer.tsx`, `components/read/index.ts`, `components/search/FilterSummaryBar.tsx`
+  - 涉及文件（修改）：`types/index.ts`, `constants/config.ts`, `hooks/useUploadTasks.ts`, `hooks/useSearch.ts`, `i18n/zh.ts`, `i18n/en.ts`, `app/(tabs)/index.tsx`, `app/(tabs)/read.tsx`, `app/search.tsx`, `components/upload/index.ts`, `components/search/index.ts`
+  - 兼容性：全跨平台，无 Android/iOS 差异
+  - 后续迭代：
+    - [ ] 真机测试分类全流程（上传选分类 → 阅读页 Drawer 筛选 → 搜索页筛选联动）
+    - [ ] GET /categories API 返回格式真机验证（当前做了多格式防御适配）
+    - [ ] 分类编辑/删除/重命名功能（需后端支持）
+    - [ ] Drawer 内收藏夹入口（已预留 i18n key，待收藏系统完善后接入）
+    - [ ] 分类 Chip 数量过多时的折叠/展开优化
+    - [ ] AI 智能分类推荐（根据笔记内容自动建议分类）
+
 ### 2026-02-22 | 搜索功能全流程打通与体验修复
 
 - [x] 功能/UI：搜索功能全流程打通 — 6 状态搜索页 + API 接入 + 标题关键词高亮 ✅ 2026-02-21

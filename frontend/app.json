@@ -2,12 +2,18 @@
   "expo": {
     "name": "SnapNote邮雁智记",
     "slug": "snap-note",
-    "version": "1.0.0",
+    "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "snapnote",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "updates": {
+      "fallbackToCacheTimeout": 0
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "ios": {
       "bundleIdentifier": "com.cjbghy.smartnote",
       "supportsTablet": true,

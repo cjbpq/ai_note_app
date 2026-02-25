@@ -10,9 +10,10 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { searchHistoryService } from "../services/searchHistoryService";
+import { useAuthStore } from "../store/useAuthStore";
 
 /** TanStack Query 缓存 key */
-const HISTORY_QUERY_KEY = ["searchHistory"] as const;
+const historyQueryKey = (userId: string) => ["searchHistory", userId] as const;
 
 /**
  * useSearchHistory 返回值类型
@@ -32,37 +33,43 @@ interface UseSearchHistoryReturn {
 
 export const useSearchHistory = (): UseSearchHistoryReturn => {
   const queryClient = useQueryClient();
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const userId = useAuthStore((state) => state.user?.id) ?? "anonymous";
+  const queryKey = historyQueryKey(userId);
 
   // ── 读取历史记录 ─────────────────────────────────
   const { data, isLoading } = useQuery({
-    queryKey: HISTORY_QUERY_KEY,
-    queryFn: searchHistoryService.getHistory,
+    queryKey,
+    queryFn: () => searchHistoryService.getHistory(userId),
+    enabled: isAuthenticated,
     // 本地存储读取很快，短时间缓存即可
     staleTime: 1000 * 60,
   });
 
   // ── 新增记录 ─────────────────────────────────────
   const addMutation = useMutation({
-    mutationFn: searchHistoryService.addHistory,
+    mutationFn: (title: string) =>
+      searchHistoryService.addHistory(userId, title),
     onSuccess: () => {
       // 写入成功后立即刷新列表缓存
-      queryClient.invalidateQueries({ queryKey: HISTORY_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey });
     },
   });
 
   // ── 删除单条 ─────────────────────────────────────
   const removeMutation = useMutation({
-    mutationFn: searchHistoryService.removeOne,
+    mutationFn: (title: string) =>
+      searchHistoryService.removeOne(userId, title),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: HISTORY_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey });
     },
   });
 
   // ── 清空全部 ─────────────────────────────────────
   const clearMutation = useMutation({
-    mutationFn: searchHistoryService.clearAll,
+    mutationFn: () => searchHistoryService.clearAll(userId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: HISTORY_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey });
     },
   });
 
