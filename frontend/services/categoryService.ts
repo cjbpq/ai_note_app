@@ -18,6 +18,13 @@ import { NoteCategory } from "../types";
 import api from "./api";
 import { parseServiceError } from "./errorService";
 
+/**
+ * 分类本地缓存 key（按账号隔离）
+ * - 目的：避免不同账号共享同一份“本地新建分类”导致串数据
+ */
+const getLocalNewCategoriesKey = (userId: string) =>
+  `${STORAGE_KEYS.LOCAL_NEW_CATEGORIES}_${userId}`;
+
 // ============================================================================
 // 后端 API：获取分类列表
 // ============================================================================
@@ -85,12 +92,15 @@ export const fetchCategories = async (): Promise<NoteCategory[]> => {
 // ============================================================================
 
 /**
- * 从 AsyncStorage 读取本地新建分类名列表
+ * 从 AsyncStorage 读取本地新建分类名列表（按账号隔离）
  * 用于在上传选择器中展示"已新建但尚未产生笔记"的分类
  */
-export const getLocalNewCategories = async (): Promise<string[]> => {
+export const getLocalNewCategories = async (
+  userId: string,
+): Promise<string[]> => {
+  const key = getLocalNewCategoriesKey(userId);
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEYS.LOCAL_NEW_CATEGORIES);
+    const raw = await AsyncStorage.getItem(key);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed)
@@ -105,21 +115,23 @@ export const getLocalNewCategories = async (): Promise<string[]> => {
  * 追加一个本地新建分类名到 AsyncStorage
  * 如果已存在同名则忽略（去重）
  *
+ * @param userId 当前登录用户 ID
  * @param name 分类名称（已去除首尾空格）
  */
-export const saveLocalNewCategory = async (name: string): Promise<void> => {
+export const saveLocalNewCategory = async (
+  userId: string,
+  name: string,
+): Promise<void> => {
   const trimmed = name.trim();
   if (!trimmed) return;
+  const key = getLocalNewCategoriesKey(userId);
 
   try {
-    const existing = await getLocalNewCategories();
+    const existing = await getLocalNewCategories(userId);
     if (existing.includes(trimmed)) return; // 已存在，无需重复
 
     existing.push(trimmed);
-    await AsyncStorage.setItem(
-      STORAGE_KEYS.LOCAL_NEW_CATEGORIES,
-      JSON.stringify(existing),
-    );
+    await AsyncStorage.setItem(key, JSON.stringify(existing));
   } catch {
     // 写入失败不阻断主流程，仅在开发模式打印
     if (__DEV__) {
@@ -130,10 +142,19 @@ export const saveLocalNewCategory = async (name: string): Promise<void> => {
 
 /**
  * 清空本地新建分类缓存
- * 通常在用户登出时调用，避免不同账号分类混淆
+ * - 传 userId: 仅清理当前账号
+ * - 不传 userId: 清理历史遗留的全局 key（兼容旧版本）
  */
-export const clearLocalNewCategories = async (): Promise<void> => {
+export const clearLocalNewCategories = async (
+  userId?: string,
+): Promise<void> => {
   try {
+    if (userId) {
+      await AsyncStorage.removeItem(getLocalNewCategoriesKey(userId));
+      return;
+    }
+
+    // 兼容旧版本：清理曾经的全局共享 key，防止升级后继续污染
     await AsyncStorage.removeItem(STORAGE_KEYS.LOCAL_NEW_CATEGORIES);
   } catch {
     // ignore

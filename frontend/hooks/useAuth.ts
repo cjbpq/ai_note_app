@@ -4,7 +4,9 @@ import { useCallback, useEffect } from "react";
 import i18next from "../i18n";
 import { authEventEmitter } from "../services/api";
 import { authService } from "../services/authService";
+import { clearLocalNewCategories } from "../services/categoryService";
 import { clearLocalNotes } from "../services/database";
+import { searchHistoryService } from "../services/searchHistoryService";
 import { useAuthStore } from "../store/useAuthStore";
 import { AuthForm, LoginResponse, ServiceError } from "../types";
 import { useToast } from "./useToast";
@@ -37,6 +39,17 @@ export const useAuth = () => {
   const clearAccountBoundCaches = useCallback(() => {
     queryClient.removeQueries({ queryKey: ["notes"] });
     queryClient.removeQueries({ queryKey: ["note"] });
+    queryClient.removeQueries({ queryKey: ["categories"] });
+    queryClient.removeQueries({ queryKey: ["searchHistory"] });
+
+    // 清理旧版本遗留的“全局共享 key”，避免升级后继续串号
+    clearLocalNewCategories().catch((e) => {
+      console.warn("[useAuth] Failed to clear legacy local categories:", e);
+    });
+    searchHistoryService.clearAll().catch((e) => {
+      console.warn("[useAuth] Failed to clear legacy search history:", e);
+    });
+
     clearLocalNotes().catch((e) => {
       console.warn("[useAuth] Failed to clear local notes cache:", e);
     });

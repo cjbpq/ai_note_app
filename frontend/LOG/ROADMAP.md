@@ -11,24 +11,24 @@
 
 > 以下清单基于 LOG/ 文件夹中的实际开发记录标注，✅ = 已落地可用，⚠️ = 部分完成。
 
-| 能力 | 状态 | 说明 |
-|------|------|------|
-| 分层架构 UI→Hooks→Services | ✅ | Zustand(客户端) + TanStack Query(服务端) 边界清晰 |
-| 鉴权闭环 (Login/Register/401) | ✅ | Token 刷新 + 失败降级 + AuthEventEmitter 解耦 |
-| 拍照/相册 双入口 + 权限分级 | ✅ | expo-image-picker，Android/iOS 权限文案已配置 |
-| 上传 → 轮询 → AI 笔记生成 | ✅ | FormData + Job 轮询 + Store 状态机 |
-| 笔记 CRUD + 多账号数据隔离 | ✅ | Query Key 注入 userId，登出清理缓存+SQLite |
-| 结构化笔记展示 (10+ 组件) | ✅ | Summary/KeyPoints/Sections/StudyAdvice 等 |
-| 数学公式离线渲染 (KaTeX) | ✅ | CSS/JS/Fonts 全 Base64 内联，Zero-CDN |
-| 收藏功能 + 乐观更新 | ✅ | API + Local Cache + UI 一致 |
-| 全局 Toast/Snackbar | ✅ | useToastStore + GlobalSnackbar |
-| 深色模式 | ✅ | Paper MD3 Light/Dark + Store 持久化 |
-| 草稿自动保存/恢复 | ✅ | AsyncStorage 自动存/检测恢复 |
-| EAS 构建 + 真机 APK | ✅ | eas.json 三套 profile，生产 APK 真机验证通过 |
-| Types 对齐后端 Schema v3 | ✅ | snake→camelCase 映射完成（冗余类型待清理） |
-| 登录/注册失败 → 友好错误提示 | ⚠️ | Toast 基础设施就绪，具体错误码→i18n 映射待补全 |
-| 编辑模式 | ⚠️ | 元数据可编辑，结构化内容的编辑尚未实现 |
-| 离线阅读 | ⚠️ | SQLite 表&读写函数已有，系统化降级策略待做 |
+| 能力                          | 状态 | 说明                                              |
+| ----------------------------- | ---- | ------------------------------------------------- |
+| 分层架构 UI→Hooks→Services    | ✅   | Zustand(客户端) + TanStack Query(服务端) 边界清晰 |
+| 鉴权闭环 (Login/Register/401) | ✅   | Token 刷新 + 失败降级 + AuthEventEmitter 解耦     |
+| 拍照/相册 双入口 + 权限分级   | ✅   | expo-image-picker，Android/iOS 权限文案已配置     |
+| 上传 → 轮询 → AI 笔记生成     | ✅   | FormData + Job 轮询 + Store 状态机                |
+| 笔记 CRUD + 多账号数据隔离    | ✅   | Query Key 注入 userId，登出清理缓存+SQLite        |
+| 结构化笔记展示 (10+ 组件)     | ✅   | Summary/KeyPoints/Sections/StudyAdvice 等         |
+| 数学公式离线渲染 (KaTeX)      | ✅   | CSS/JS/Fonts 全 Base64 内联，Zero-CDN             |
+| 收藏功能 + 乐观更新           | ✅   | API + Local Cache + UI 一致                       |
+| 全局 Toast/Snackbar           | ✅   | useToastStore + GlobalSnackbar                    |
+| 深色模式                      | ✅   | Paper MD3 Light/Dark + Store 持久化               |
+| 草稿自动保存/恢复             | ✅   | AsyncStorage 自动存/检测恢复                      |
+| EAS 构建 + 真机 APK           | ✅   | eas.json 三套 profile，生产 APK 真机验证通过      |
+| Types 对齐后端 Schema v3      | ✅   | snake→camelCase 映射完成（冗余类型待清理）        |
+| 登录/注册失败 → 友好错误提示  | ⚠️   | Toast 基础设施就绪，具体错误码→i18n 映射待补全    |
+| 编辑模式                      | ⚠️   | 元数据可编辑，结构化内容的编辑尚未实现            |
+| 离线阅读                      | ⚠️   | SQLite 表&读写函数已有，系统化降级策略待做        |
 
 ---
 
@@ -74,7 +74,7 @@
 
 - [x] 登录/注册页底部 Tab 栏 主题未同步深色模式
 - [x] 编辑模式体验重设计：至少保证"标题/标签/原文"可编辑 + 保存成功/失败闭环
-- [ ] 拍照结果页优化：折叠原文 / 结构化预览信息层级
+- [x] 拍照结果页优化：折叠原文 / 结构化预览信息层级
 - [ ] 防御性编程系统审查：逐页检查 `?.` / `??`（重点 structuredData 各字段渲染路径）
 
 ### 2.4 Types 清理
@@ -220,16 +220,16 @@
 
 > 不紧急但影响后续方向的问题，在相关阶段开始前做决定即可。
 
-| # | 问题 | 影响阶段 | 建议 |
-|---|------|---------|------|
-| 1 | **离线策略**：离线只读 vs 离线编辑+同步？ | 阶段 4 | MVP 先只读，规避冲突解决复杂度 |
-| 2 | **AI 能力边界**：后端已有/计划的 AI 接口清单？ | 阶段 5 | 与后端同学确认，前端按需对接 |
-| 3 | **功能优先级**：收藏列表/搜索/导出/设置，先做哪个？ | 阶段 6 | 根据真机测试反馈决定 |
-| 4 | **Sentry 时机**：是否提前到阶段 2~3 接入？ | 阶段 8→2 | 建议提前，对真机调试帮助极大 |
-| 5 | **Token 安全**：何时从 AsyncStorage 迁移到 SecureStore？ | 阶段 8 | 内测前完成即可 |
-| 6 | **HTTPS**：后端何时部署 HTTPS？ | 阶段 8 | 与后端同学协商，影响前端关闭明文流量 |
-| 7 | **多图上传**：后端是否支持/计划？ | 阶段 5 | 前端先预留 UI，后端就绪再对接 |
-| 8 | **KaTeX vs MathJax**：是否需要切换渲染引擎？ | 阶段 3 | 先优化 KaTeX 清洗管道，不稳定再评估 MathJax |
+| #   | 问题                                                     | 影响阶段 | 建议                                        |
+| --- | -------------------------------------------------------- | -------- | ------------------------------------------- |
+| 1   | **离线策略**：离线只读 vs 离线编辑+同步？                | 阶段 4   | MVP 先只读，规避冲突解决复杂度              |
+| 2   | **AI 能力边界**：后端已有/计划的 AI 接口清单？           | 阶段 5   | 与后端同学确认，前端按需对接                |
+| 3   | **功能优先级**：收藏列表/搜索/导出/设置，先做哪个？      | 阶段 6   | 根据真机测试反馈决定                        |
+| 4   | **Sentry 时机**：是否提前到阶段 2~3 接入？               | 阶段 8→2 | 建议提前，对真机调试帮助极大                |
+| 5   | **Token 安全**：何时从 AsyncStorage 迁移到 SecureStore？ | 阶段 8   | 内测前完成即可                              |
+| 6   | **HTTPS**：后端何时部署 HTTPS？                          | 阶段 8   | 与后端同学协商，影响前端关闭明文流量        |
+| 7   | **多图上传**：后端是否支持/计划？                        | 阶段 5   | 前端先预留 UI，后端就绪再对接               |
+| 8   | **KaTeX vs MathJax**：是否需要切换渲染引擎？             | 阶段 3   | 先优化 KaTeX 清洗管道，不稳定再评估 MathJax |
 
 ---
 

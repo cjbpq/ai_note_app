@@ -64,7 +64,7 @@ export const useCategories = () => {
       // 并行获取后端分类和本地新建分类
       const [remoteCats, localNames] = await Promise.all([
         fetchCategories(),
-        getLocalNewCategories(),
+        getLocalNewCategories(userId),
       ]);
 
       // 合并：后端优先，本地新建去重追加
@@ -117,9 +117,9 @@ export const useCategories = () => {
       });
 
       // 2. 持久化到 AsyncStorage
-      await saveLocalNewCategory(trimmed);
+      await saveLocalNewCategory(userId, trimmed);
     },
-    [queryClient, queryKey],
+    [queryClient, queryKey, userId],
   );
 
   // ── 刷新 ──
