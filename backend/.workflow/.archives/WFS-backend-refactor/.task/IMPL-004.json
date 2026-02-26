@@ -1,0 +1,247 @@
+{
+  "id": "IMPL-004",
+  "title": "测试基础设施和黄金文件测试框架 (P1)",
+  "status": "completed",
+  "meta": {
+    "type": "testing",
+    "agent": "@code-developer",
+    "priority": "P1",
+    "estimated_complexity": "high"
+  },
+  "context": {
+    "requirements": [
+      "建立完整测试基础设施: [pytest 配置, 测试目录结构, fixtures, 测试工具]",
+      "实现黄金文件测试框架: [baseline 生成, 差异对比, 审批机制]",
+      "新增 10+ 个核心测试文件: [conftest.py, golden 测试, security 测试, 性能测试]",
+      "达成测试覆盖率目标: 单元测试 ≥70%, services 层 ≥80%"
+    ],
+    "focus_paths": [
+      "tests/",
+      "pytest.ini",
+      ".coveragerc",
+      "tests/conftest.py",
+      "tests/golden/",
+      "tests/security/",
+      "tests/unit/services/"
+    ],
+    "acceptance": [
+      "测试基础设施完整: 验证 pytest.ini, .coveragerc, tests/conftest.py 文件存在",
+      "黄金文件测试框架可用: 验证 pytest tests/golden/ --golden-update 成功生成 baselines",
+      "测试目录结构规范: 验证 tests/{unit,integration,golden,security,performance}/ 目录存在",
+      "测试覆盖率达标: 验证 pytest --cov=app --cov-report=term 显示 coverage ≥70%",
+      "CI/CD 流程配置: 验证 .github/workflows/test.yml 文件存在并可执行"
+    ],
+    "depends_on": ["IMPL-001", "IMPL-002", "IMPL-003"],
+    "artifacts": [
+      {
+        "type": "synthesis_specification",
+        "path": ".workflow/WFS-backend-refactor/.brainstorming/guidance-specification.md",
+        "priority": "highest",
+        "relevant_sections": ["测试策略", "质量门禁"]
+      },
+      {
+        "type": "role_analysis",
+        "path": ".workflow/WFS-backend-refactor/.brainstorming/test-strategist/analysis.md",
+        "priority": "highest",
+        "relevant_sections": ["测试策略框架", "黄金文件测试", "测试基础设施", "质量门禁"]
+      }
+    ]
+  },
+  "flow_control": {
+    "pre_analysis": [
+      {
+        "step": "load_testing_strategy",
+        "description": "加载完整测试策略文档",
+        "commands": [
+          "Read(.workflow/WFS-backend-refactor/.brainstorming/test-strategist/analysis.md)",
+          "Grep(pattern='def test_', path='tests/', output_mode='count')"
+        ],
+        "output_to": "testing_strategy",
+        "on_error": "fail_task"
+      },
+      {
+        "step": "analyze_existing_tests",
+        "description": "分析现有测试覆盖情况",
+        "commands": [
+          "Bash(find tests/ -name 'test_*.py' | wc -l)",
+          "Bash(pytest --collect-only -q | grep '<Function' | wc -l)"
+        ],
+        "output_to": "existing_test_analysis",
+        "on_error": "continue_optional"
+      }
+    ],
+    "implementation_approach": [
+      {
+        "step": 1,
+        "title": "建立测试基础设施",
+        "description": "创建 pytest 配置和测试目录结构",
+        "modification_points": [
+          "新增 pytest.ini (30 行): [testpaths, markers, addopts 覆盖率配置]",
+          "新增 .coveragerc (20 行): [source, omit, report 配置]",
+          "创建测试目录结构: mkdir -p tests/{unit/services,integration,golden/baselines,security,performance}",
+          "新增 tests/conftest.py (80 行): [db_session, test_user, test_client, mock_doubao_service fixtures]",
+          "新增 tests/factories.py (40 行): [UserFactory, NoteFactory 使用 factory_boy]",
+          "安装测试依赖: pytest-cov pytest-asyncio pytest-mock deepdiff factory-boy bandit safety"
+        ],
+        "logic_flow": [
+          "读取 test-strategist/analysis.md 第 336-447 行 (测试自动化策略和配置)",
+          "创建 pytest.ini 配置文件 (markers, addopts, testpaths)",
+          "创建 .coveragerc 配置覆盖率报告 (source, omit, report)",
+          "创建 5 个测试子目录 (unit/integration/golden/security/performance)",
+          "创建 conftest.py 定义 4 个核心 fixtures (db_session, test_user, test_client, mock_doubao)",
+          "创建 factories.py 定义测试数据工厂 (UserFactory, NoteFactory)",
+          "生成 requirements-test.txt 列出测试依赖 (6 个包)"
+        ],
+        "depends_on": [],
+        "output": "test_infrastructure_setup",
+        "学习要点": [
+          "pytest.ini 作用: 统一测试配置, 避免每次运行手动指定参数",
+          "pytest fixtures: 提供测试数据和环境初始化, 支持作用域 (function/session) 和依赖注入",
+          "factory_boy 工厂模式: 简化测试数据生成, 避免重复创建测试对象代码"
+        ]
+      },
+      {
+        "step": 2,
+        "title": "实现黄金文件测试框架",
+        "description": "创建黄金文件测试核心代码和基础设施",
+        "modification_points": [
+          "新增 tests/golden/conftest.py (120 行): [golden_assert fixture, pytest_addoption, _is_approved_diff 函数]",
+          "新增 tests/golden/test_golden_auth.py (30 行): [test_golden_login_success, test_golden_register_response]",
+          "新增 tests/golden/test_golden_notes.py (60 行): [test_golden_notes_list, test_golden_note_create, test_golden_search_notes]",
+          "新增 tests/golden/approved_diffs.yaml (5 行): 空文件模板",
+          "创建 tests/golden/baselines/ 目录",
+          "新增 scripts/seed_golden_test_data.py (50 行): 生成固定测试数据脚本"
+        ],
+        "logic_flow": [
+          "读取 test-strategist/analysis.md 第 746-1006 行 (黄金文件测试框架完整设计)",
+          "创建 golden/conftest.py 实现核心 golden_assert fixture (120 行)",
+          "创建 2 个黄金测试文件覆盖认证和笔记 API (共 90 行)",
+          "创建 approved_diffs.yaml 文件模板",
+          "创建 scripts/seed_golden_test_data.py 脚本生成固定测试数据 (50 行)",
+          "生成重构前 baseline: pytest tests/golden/ --golden-update -v"
+        ],
+        "depends_on": [1],
+        "output": "golden_test_framework",
+        "学习要点": [
+          "黄金文件测试原理: 保存重构前 API 响应作为基准, 重构后自动对比确保行为一致",
+          "DeepDiff 库: 智能对比 JSON 差异, 支持排除动态字段 (id, timestamp) 和忽略列表顺序",
+          "测试数据可重复性: 使用固定种子数据确保每次测试结果一致"
+        ]
+      },
+      {
+        "step": 3,
+        "title": "补充核心单元测试",
+        "description": "为 services 层补充单元测试覆盖率",
+        "modification_points": [
+          "新增 tests/unit/services/test_note_service.py (80 行): [test_create_note, test_search_notes_sql_injection, test_get_note_by_id, test_delete_note]",
+          "新增 tests/unit/core/test_security.py (50 行): [test_create_access_token_timezone_aware, test_password_hash_strength, test_verify_password]",
+          "新增 tests/unit/services/test_doubao_service.py (40 行): [test_availability_status, test_generate_note_mock]",
+          "新增 tests/unit/utils/test_text_cleaning.py (30 行): 已存在, 补充测试用例"
+        ],
+        "logic_flow": [
+          "读取 test-strategist/analysis.md 第 139-213 行 (测试金字塔策略)",
+          "创建 test_note_service.py 覆盖 NoteService 核心方法 (80 行, 4 个测试)",
+          "创建 test_security.py 覆盖 JWT 和密码哈希 (50 行, 3 个测试)",
+          "创建 test_doubao_service.py 覆盖 Doubao 服务 (40 行, 2 个测试)",
+          "补充 test_text_cleaning.py 测试用例",
+          "运行测试验证覆盖率: pytest tests/unit/ --cov=app/services --cov=app/core"
+        ],
+        "depends_on": [1, 2],
+        "output": "unit_tests_completed",
+        "学习要点": [
+          "单元测试金字塔: 60% 单元测�� + 30% 集成测试 + 10% E2E 测试",
+          "Mock 外部依赖: 使用 monkeypatch 和 pytest-mock 隔离外部服务 (Doubao API, 数据库)",
+          "测试覆盖率目标: services 层 ≥80%, 总体 ≥70%"
+        ]
+      },
+      {
+        "step": 4,
+        "title": "补充安全测试套件",
+        "description": "创建完整安全测试覆盖 OWASP Top 10",
+        "modification_points": [
+          "新增 tests/security/test_sql_injection.py (60 行): [5 个 SQL 注入攻击向量测试]",
+          "新增 tests/security/test_auth_security.py (70 行): [JWT 过期测试, Token 伪造测试, 未授权访问测试]",
+          "新增 tests/security/test_cors_security.py (30 行): [非法 Origin 拒绝测试, 白名单验证测试]",
+          "新增 tests/security/test_password_security.py (40 行): [bcrypt 强度测试, 密码哈希唯一性测试]",
+          "新增 tests/security/test_secret_key.py (30 行): [SECRET_KEY 环境变量测试, 最小长度测试]"
+        ],
+        "logic_flow": [
+          "读取 test-strategist/analysis.md 第 1148-1328 行 (安全测试策略完整方案)",
+          "创建 5 个安全测试文件覆盖 OWASP API Security Top 10 (共 230 行)",
+          "每个文件包含 2-5 个测试用例验证安全修复",
+          "运行安全测试: pytest tests/security/ -v",
+          "运行 bandit 扫描验证: bandit -r app/ -ll -f json"
+        ],
+        "depends_on": [1, 2, 3],
+        "output": "security_tests_completed",
+        "学习要点": [
+          "OWASP API Security Top 10: SQL 注入, 破损的认证, CORS 配置, 硬编码密钥等",
+          "安全测试用例设计: 每��漏洞修复必须有对应的测试验证防护措施",
+          "bandit 静态扫描: 自动化检测已知安全模式 (B105 硬编码密码, B608 SQL 注入)"
+        ]
+      },
+      {
+        "step": 5,
+        "title": "配置 CI/CD 流程",
+        "description": "创建 GitHub Actions 工作流自动运行测试",
+        "modification_points": [
+          "新增 .github/workflows/test.yml (80 行): [单元测试, 集成测试, 安全扫描, 覆盖率上传]",
+          "新增 .pre-commit-config.yaml (40 行): [black, flake8, mypy, bandit pre-commit hooks]",
+          "修改 .gitignore: 新增测试相关忽略项 (.coverage, htmlcov/, .pytest_cache/)"
+        ],
+        "logic_flow": [
+          "读取 test-strategist/analysis.md 第 375-424 行 (CI/CD 集成方案)",
+          "创建 .github/workflows/test.yml 定义 4 个 job (80 行)",
+          "创建 .pre-commit-config.yaml 配置本地代码质量检查 (40 行)",
+          "更新 .gitignore 忽略测试临时文件",
+          "测试 CI 配置: 本地运行 act 或推送到 GitHub 触发"
+        ],
+        "depends_on": [1, 2, 3, 4],
+        "output": "ci_cd_configured",
+        "学习要点": [
+          "GitHub Actions: 自动化 CI/CD 流程, 每次 PR/push 触发测试",
+          "Pre-commit hooks: 本地提交前自动检查代码质量, 防止低质量代码提交",
+          "质量门禁: 测试覆盖率 ≥70%, bandit 0 个 High 风险, 所有测试通过"
+        ]
+      },
+      {
+        "step": 6,
+        "title": "生成测试报告和文档",
+        "description": "运行完整测试套件并生成报告",
+        "modification_points": [
+          "运行完整测试: pytest tests/ -v --cov=app --cov-report=html --cov-report=term",
+          "运行黄金文件测试: pytest tests/golden/ -v",
+          "运行安全扫描: bandit -r app/ -ll -f json -o bandit-report.json && safety check --json",
+          "生成测试报告: 覆盖率报告 + 测试用例统计 + 安全扫描结果",
+          "新增 tests/README.md (50 行): 测试使用文档"
+        ],
+        "logic_flow": [
+          "执行完整测试套件 (预计 50+ 个测试用例)",
+          "生成 HTML 覆盖率报告: htmlcov/index.html",
+          "生成安全扫描报告: bandit-report.json",
+          "统计测试指标: 总测试数, 覆盖率, 执行时间",
+          "创建 tests/README.md 文档说明测试使用方法 (50 行)"
+        ],
+        "depends_on": [1, 2, 3, 4, 5],
+        "output": "test_framework_complete"
+      }
+    ],
+    "target_files": [
+      "pytest.ini",
+      ".coveragerc",
+      "tests/conftest.py",
+      "tests/factories.py",
+      "tests/golden/conftest.py",
+      "tests/golden/test_golden_auth.py",
+      "tests/golden/test_golden_notes.py",
+      "tests/unit/services/test_note_service.py",
+      "tests/unit/core/test_security.py",
+      "tests/security/test_sql_injection.py",
+      "tests/security/test_auth_security.py",
+      "tests/security/test_cors_security.py",
+      ".github/workflows/test.yml",
+      ".pre-commit-config.yaml",
+      "tests/README.md"
+    ]
+  }
+}

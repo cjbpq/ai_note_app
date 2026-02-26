@@ -1,0 +1,152 @@
+# Pre-commit hooks 配置
+# 学习要点:
+# - pre-commit: 本地提交前自动检查代码质量
+# - hooks: 定义检查项 (格式化, 代码风格, 安全扫描)
+# - 用法: pre-commit install (安装 hooks), git commit (自动触发)
+
+# 安装���法:
+# pip install pre-commit
+# pre-commit install
+
+repos:
+  # ========================================
+  # 1. 代码格式化 (black)
+  # ========================================
+  - repo: https://github.com/psf/black
+    rev: 23.12.1
+    hooks:
+      - id: black
+        name: Black (代码格式化)
+        language_version: python3.11
+        args: [--line-length=120]
+        description: |
+          学习要点:
+          - black: Python 代码格式化工具 (opinionated)
+          - 自动修复: 提交前自动格式化代码
+          - 统一风格: 团队代码风格一致
+
+  # ========================================
+  # 2. 代码风格检查 (flake8)
+  # ========================================
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+        name: Flake8 (代码风格检查)
+        args: [--max-line-length=120, --extend-ignore=E203,W503]
+        description: |
+          学习要点:
+          - flake8: PEP 8 代码风格检查
+          - E203: black 格式化后的冲突忽略
+          - W503: 行首二元操作符 (与 black 兼容)
+
+  # ========================================
+  # 3. 类型检查 (mypy)
+  # ========================================
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.8.0
+    hooks:
+      - id: mypy
+        name: Mypy (类型检查)
+        args: [--ignore-missing-imports, --python-version=3.11]
+        additional_dependencies: [types-all]
+        exclude: ^tests/
+        description: |
+          学习要点:
+          - mypy: 静态类型检查工具
+          - 提前发现类型错误
+          - 排除测试文件 (测试代码类型要求较低)
+
+  # ========================================
+  # 4. 安全扫描 (bandit)
+  # ========================================
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.6
+    hooks:
+      - id: bandit
+        name: Bandit (安全扫描)
+        args: [-ll, -q, -r, app/]
+        description: |
+          学习要点:
+          - bandit: Python 代码安全扫描
+          - -ll: 仅报告 Medium/High 风险
+          - -q: 安静模式 (仅显示问题)
+          - 阻止提交: 发现安全问题时阻止提交
+
+  # ========================================
+  # 5. 通用 hooks (pre-commit 内置)
+  # ========================================
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      # 检查合并冲突标记
+      - id: check-merge-conflict
+        name: Check merge conflicts
+
+      # 检查 YAML 格式
+      - id: check-yaml
+        name: Check YAML syntax
+        exclude: ^\.github/workflows/
+
+      # 检查 JSON 格式
+      - id: check-json
+        name: Check JSON syntax
+
+      # 移除文件末尾空白行
+      - id: trailing-whitespace
+        name: Trim trailing whitespace
+
+      # 确保文件以换行符结尾
+      - id: end-of-file-fixer
+        name: Fix end of files
+
+      # 检查大文件 (> 500KB)
+      - id: check-added-large-files
+        name: Check for large files
+        args: [--maxkb=500]
+
+      # 检查��钥文件
+      - id: detect-private-key
+        name: Detect private keys
+
+# ========================================
+# 学习要点总结
+# ========================================
+
+# 1. Pre-commit workflow:
+#    git add .                  # 暂存文件
+#    git commit -m "message"    # 触发 pre-commit hooks
+#    → black 自动格式化代码
+#    → flake8 检查代码风格
+#    → mypy 检查类型错误
+#    → bandit 扫描安全问题
+#    → 通过检查后完成提交
+
+# 2. 跳过 hooks (紧急情况):
+#    git commit --no-verify -m "message"
+#    (不推荐, 仅紧急情况使用)
+
+# 3. 手动运行 hooks:
+#    pre-commit run --all-files  # 检查所有文件
+#    pre-commit run black        # 仅运行 black
+
+# 4. 更新 hooks:
+#    pre-commit autoupdate       # 更新到最新版本
+
+# 5. 为什么使用 pre-commit:
+#    - 早期发现问题: 提交前自动检查
+#    - 团队一致性: 统一代码质量标准
+#    - 减少 CI 失败: 本地通过后再推送
+#    - 节省时间: 避免反复修复 CI 错误
+
+# 6. Hook 执行顺序:
+#    1. black (自动修复)
+#    2. flake8 (检查风格)
+#    3. mypy (类型检查)
+#    4. bandit (安全扫描)
+#    5. 通用 hooks (格式检查)
+
+# 7. 失败处理:
+#    - black: 自动修复后需重新 git add
+#    - flake8/mypy: 手动修复后重新提交
+#    - bandit: 修复安全问题后重新提交
