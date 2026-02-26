@@ -1,0 +1,199 @@
+{
+  "id": "IMPL-001",
+  "title": "严重安全漏洞修复 (P0)",
+  "status": "pending",
+  "meta": {
+    "type": "security-fix",
+    "agent": "@code-developer",
+    "priority": "P0",
+    "estimated_complexity": "medium"
+  },
+  "context": {
+    "requirements": [
+      "修复 3 个严重安全漏洞: [SECRET_KEY 硬编码 (config.py:23), CORS 配置过度开放 (main.py:70-76), SQL 注入风险 (note_service.py:99)]",
+      "修改 3 个核心文件: [app/core/config.py (SECRET_KEY), app/main.py (CORS), app/services/note_service.py (查询方法)]",
+      "新增 2 个配置项到 .env.example: [SECRET_KEY 生成说明, ALLOWED_ORIGINS 白名单示例]"
+    ],
+    "focus_paths": [
+      "app/core/config.py",
+      "app/main.py",
+      "app/services/note_service.py",
+      ".env.example"
+    ],
+    "acceptance": [
+      "3 个安全漏洞已修复: 验证 bandit -r app/ -ll 输出 0 个 High 风险",
+      "SECRET_KEY 从环境变量加载: 验证 config.py 无硬编码默认值",
+      "CORS 限制为白名单: 验证 settings.ALLOWED_ORIGINS.split(',') 被使用",
+      "SQL 查询使用参数化: 验证 note_service.py 无 f-string SQL 拼接",
+      "新增 5+ 个安全测试用例通过: 验证 pytest tests/security/ -v 退出码 0"
+    ],
+    "depends_on": [],
+    "artifacts": [
+      {
+        "type": "synthesis_specification",
+        "path": ".workflow/WFS-backend-refactor/.brainstorming/guidance-specification.md",
+        "priority": "highest",
+        "relevant_sections": ["安全架构决策", "风险缓解策略"]
+      },
+      {
+        "type": "role_analysis",
+        "path": ".workflow/WFS-backend-refactor/.brainstorming/subject-matter-expert/analysis.md",
+        "priority": "high",
+        "relevant_sections": ["OWASP API Security", "安全漏洞修复", "SECRET_KEY 硬编码", "CORS 配置", "SQL 注入防护"]
+      },
+      {
+        "type": "role_analysis",
+        "path": ".workflow/WFS-backend-refactor/.brainstorming/test-strategist/analysis.md",
+        "priority": "high",
+        "relevant_sections": ["安全测试策略", "风险驱动测试", "SQL 注入测试用例"]
+      }
+    ]
+  },
+  "flow_control": {
+    "pre_analysis": [
+      {
+        "step": "load_artifacts",
+        "description": "加载综合规范和角色分析中的安全修复方案",
+        "commands": [
+          "Read(.workflow/WFS-backend-refactor/.brainstorming/guidance-specification.md)",
+          "Read(.workflow/WFS-backend-refactor/.brainstorming/subject-matter-expert/analysis.md)",
+          "Read(.workflow/WFS-backend-refactor/.brainstorming/test-strategist/analysis.md)"
+        ],
+        "output_to": "security_requirements",
+        "on_error": "fail_task"
+      },
+      {
+        "step": "analyze_current_security_issues",
+        "description": "扫描当前安全问题并定位修复点",
+        "commands": [
+          "Bash(bandit -r app/ -ll -f json -o /tmp/bandit-baseline.json 2>&1)",
+          "Grep(pattern='SECRET_KEY.*=.*[\"\\']', path='app/core/config.py', output_mode='content')",
+          "Grep(pattern='allow_origins.*\\[.*\\*.*\\]', path='app/main.py', output_mode='content')",
+          "Grep(pattern='f\"%.*{.*query.*}.*%\"', path='app/services/note_service.py', output_mode='content')"
+        ],
+        "output_to": "security_issues_baseline",
+        "on_error": "continue_optional"
+      },
+      {
+        "step": "mcp_security_best_practices",
+        "description": "获取 FastAPI 安全最佳实践文档",
+        "commands": [
+          "mcp__context7__resolve-library-id(libraryName='fastapi')",
+          "mcp__context7__get-library-docs(context7CompatibleLibraryID='/websites/fastapi_tiangolo_com', topic='security', page=1)"
+        ],
+        "output_to": "fastapi_security_docs",
+        "on_error": "skip_optional"
+      }
+    ],
+    "implementation_approach": [
+      {
+        "step": 1,
+        "title": "修复 SECRET_KEY 硬编码漏洞",
+        "description": "将 SECRET_KEY 从硬编码字符串改为必填环境变量",
+        "modification_points": [
+          "修改 app/core/config.py 第 23 行: SECRET_KEY 字段改为 Field(..., min_length=32, description='JWT 签名密钥（从环境变量加载）')",
+          "删除 app/core/config.py 的 SECRET_KEY 默认值",
+          "新增 .env.example 配置说明: SECRET_KEY 生成命令和示例值",
+          "新增 tests/security/test_secret_key.py (3 个测试用例): [test_secret_key_not_hardcoded(), test_secret_key_min_length(), test_secret_key_from_env()]"
+        ],
+        "logic_flow": [
+          "读取 subject-matter-expert/analysis.md 第 823-840 行 (SECRET_KEY 修复方案)",
+          "修改 config.py Settings 类的 SECRET_KEY 字段定义 (1 处修改)",
+          "生成安全密钥示例: python -c \"import secrets; print(secrets.token_urlsafe(32))\"",
+          "更新 .env.example 文件 (新增 SECRET_KEY 配置说明)",
+          "编写 3 个测试用例验证修复: 无硬编码、最小长度 32、环境变量加载",
+          "新增学习注释: 说明为什么硬编码密钥不安全 (JWT 伪造风险)"
+        ],
+        "depends_on": [],
+        "output": "secret_key_fixed",
+        "学习要点": [
+          "SECRET_KEY 硬编码风险: 攻击者可以伪造任意用户的 JWT token, 绕过身份验证",
+          "安全密钥生成: 使用 secrets.token_urlsafe(32) 生成至少 32 字节的随机密钥",
+          "环境变量最佳实践: 敏感配置应从环境变量或密钥管理服务加载, 永远不要提交到版本控制"
+        ]
+      },
+      {
+        "step": 2,
+        "title": "修复 CORS 配置过度开放漏洞",
+        "description": "将 allow_origins=['*'] 限制为前端域名白名单",
+        "modification_points": [
+          "修改 app/core/config.py: 新增 ALLOWED_ORIGINS 字段 (默认值 'http://localhost:3000,http://localhost:5173')",
+          "修改 app/main.py 第 72 行: allow_origins=settings.ALLOWED_ORIGINS.split(',')",
+          "修改 app/main.py 第 74-75 行: allow_methods 限制为 ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']",
+          "新增 .env.example 配置示例: ALLOWED_ORIGINS 生产环境配置",
+          "新增 tests/security/test_cors_security.py (2 个测试用例): [test_cors_rejects_unknown_origin(), test_cors_allows_whitelisted_origin()]"
+        ],
+        "logic_flow": [
+          "读取 subject-matter-expert/analysis.md 第 843-882 行 (CORS 修复方案)",
+          "修改 config.py 新增 ALLOWED_ORIGINS 配置字段 (1 处新增)",
+          "修改 main.py CORSMiddleware 配置 (3 处修改: origins/methods/headers)",
+          "更新 .env.example 文件 (新增 ALLOWED_ORIGINS 配置说明)",
+          "编写 2 个测试用例验证 CORS 限制: 拒绝非法 Origin + 允许白名单 Origin",
+          "新增学习注释: 说明 CORS 配置为什么需要限制 (CSRF 攻击风险)"
+        ],
+        "depends_on": [1],
+        "output": "cors_config_fixed",
+        "学习要点": [
+          "CORS 漏洞风险: allow_origins=['*'] + allow_credentials=True 会导致 CSRF 攻击",
+          "CSRF 攻击场景: 恶意网站 evil.com 上的 JavaScript 可以利用用户浏览器 cookies 调用本项目 API",
+          "最小权限原则: 仅允许已知的前端域名访问后端 API, 生产环境应设置为实际部署域名"
+        ]
+      },
+      {
+        "step": 3,
+        "title": "修复 SQL 注入防护漏洞",
+        "description": "将字符串拼接查询改为 ORM 参数化查询",
+        "modification_points": [
+          "修改 app/services/note_service.py 第 98-109 行: search_notes() 方法使用 or_() 替代手动拼接",
+          "移除 note_service.py 第 100 行: like_expr = f\"%{query}%\" (字符串拼接)",
+          "修改 note_service.py 第 105-106 行: 使用 Note.title.ilike(f\"%{query}%\") (ORM 参数化)",
+          "导入 sqlalchemy.or_ 函数",
+          "新增 tests/security/test_sql_injection.py (5 个测试用例): [test_search_notes_prevents_drop_table, test_search_notes_prevents_union_select, test_search_notes_prevents_update_injection, test_search_notes_special_chars, test_database_integrity_after_injection_attempt]"
+        ],
+        "logic_flow": [
+          "读取 subject-matter-expert/analysis.md 第 134-183 行 (SQL 注入修复方案)",
+          "修改 note_service.py search_notes() 方法 (移除 1 行, 修改 2 行, 新增 1 个导入)",
+          "将 f-string 拼接改为 ORM .ilike() 方法 (SQLAlchemy 自动参数化)",
+          "使用 or_() 构建多字段模糊查询逻辑",
+          "编写 5 个 SQL 注入测试用例: 覆盖 DROP TABLE, UNION SELECT, UPDATE, 特殊字符, 数据完整性验证",
+          "新增学习注释: 说明 ORM 如何防止 SQL 注入 (参数化查询机制)"
+        ],
+        "depends_on": [1, 2],
+        "output": "sql_injection_fixed",
+        "学习要点": [
+          "SQL 注入风险: 手动拼接 SQL 字符串可能导致数据库被删除、数据泄露或篡改",
+          "ORM 参数化查询: SQLAlchemy 的 .filter() 和 .ilike() 方法会自动转义参数, 防止 SQL 注入",
+          "安全编程原则: 永远不要手动拼接 SQL 字符串 (即使是 f\"SELECT * FROM notes WHERE title LIKE '%{query}%'\")"
+        ]
+      },
+      {
+        "step": 4,
+        "title": "集成安全扫描和测试验证",
+        "description": "运行安全扫描工具和测试套件验证修复",
+        "modification_points": [
+          "运行 bandit 扫描: bandit -r app/ -ll -f json -o security-scan-report.json",
+          "运行 safety 检查: safety check --json",
+          "运行安全测试套件: pytest tests/security/ -v",
+          "生成修复报告: 对比修复前后 bandit 报告差异"
+        ],
+        "logic_flow": [
+          "执行 bandit 扫描验证 0 个 High 风险",
+          "执行 safety 检查验证 0 个已知 CVE",
+          "执行 pytest tests/security/ 验证所有安全测试通过",
+          "生成修复报告: 列出修复的 3 个漏洞和新增的测试用例"
+        ],
+        "depends_on": [1, 2, 3],
+        "output": "security_verification_report"
+      }
+    ],
+    "target_files": [
+      "app/core/config.py:Settings:23",
+      "app/main.py:CORSMiddleware:70-76",
+      "app/services/note_service.py:search_notes:98-109",
+      ".env.example",
+      "tests/security/test_secret_key.py",
+      "tests/security/test_cors_security.py",
+      "tests/security/test_sql_injection.py"
+    ]
+  }
+}

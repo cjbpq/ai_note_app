@@ -1,0 +1,256 @@
+{
+  "id": "IMPL-003",
+  "title": "架构模式和代码质量改进 (P1)",
+  "status": "completed",
+  "meta": {
+    "type": "refactor",
+    "agent": "@code-developer",
+    "priority": "P1",
+    "estimated_complexity": "high"
+  },
+  "context": {
+    "requirements": [
+      "实现 5 个架构改进: [全局异常处理器, 依赖注入模式, BackgroundTasks 异步任务, 统一日志系统, 代码重复消除]",
+      "新增 3 个核心文件: [app/core/exceptions.py (自定义异常), app/core/dependencies.py (依赖注入), app/core/logging_config.py (日志配置)]",
+      "修改 5 个文件: [app/main.py (异常处理器+日志), app/api/v1/endpoints/library.py (BackgroundTasks+依赖注入), app/services/*.py (日志记录)]",
+      "新增 8 个测试用例: [异常处理器测试 3 个, BackgroundTasks 测试 2 个, 依赖注入测试 2 个, 日志记录测试 1 个]"
+    ],
+    "focus_paths": [
+      "app/core/exceptions.py",
+      "app/core/dependencies.py",
+      "app/core/logging_config.py",
+      "app/main.py",
+      "app/api/v1/endpoints/library.py",
+      "app/services/"
+    ],
+    "acceptance": [
+      "5 个架构改进已实现: 验证新增 3 个核心文件存在且通过 import 测试",
+      "全局异常处理器生效: 验证 curl API 返回标准化错误格式 (error, detail, timestamp 字段)",
+      "BackgroundTasks 替换 asyncio.create_task: 验证 grep -r 'asyncio.create_task' app/ 无结果",
+      "依赖注入消除代码重复: 验证 doubao availability check 仅在 dependencies.py 定义 1 次",
+      "统一日志记录: 验证所有 service 文件包含 logger = logging.getLogger(__name__)",
+      "新增 8 个测试用例通过: 验证 pytest tests/integration/test_architecture.py -v 退出码 0"
+    ],
+    "depends_on": [
+      "IMPL-001",
+      "IMPL-002"
+    ],
+    "artifacts": [
+      {
+        "type": "synthesis_specification",
+        "path": ".workflow/WFS-backend-refactor/.brainstorming/guidance-specification.md",
+        "priority": "highest",
+        "relevant_sections": [
+          "架构设计决策",
+          "异常处理策略",
+          "日志系统"
+        ]
+      },
+      {
+        "type": "role_analysis",
+        "path": ".workflow/WFS-backend-refactor/.brainstorming/system-architect/analysis.md",
+        "priority": "highest",
+        "relevant_sections": [
+          "全局异常处理",
+          "依赖注入模式",
+          "日志记录",
+          "异步任务管理"
+        ]
+      },
+      {
+        "type": "role_analysis",
+        "path": ".workflow/WFS-backend-refactor/.brainstorming/subject-matter-expert/analysis.md",
+        "priority": "high",
+        "relevant_sections": [
+          "架构模式",
+          "依赖注入",
+          "异步任务",
+          "日志系统"
+        ]
+      }
+    ]
+  },
+  "flow_control": {
+    "pre_analysis": [
+      {
+        "step": "load_architecture_patterns",
+        "description": "加载架构设计模式和最佳实践",
+        "commands": [
+          "Read(.workflow/WFS-backend-refactor/.brainstorming/system-architect/analysis.md)",
+          "Read(.workflow/WFS-backend-refactor/.brainstorming/subject-matter-expert/analysis.md)",
+          "mcp__context7__get-library-docs(context7CompatibleLibraryID='/websites/fastapi_tiangolo_com', topic='dependency injection', page=1)"
+        ],
+        "output_to": "architecture_patterns",
+        "on_error": "continue_optional"
+      },
+      {
+        "step": "analyze_code_duplication",
+        "description": "定位代码重复点 (doubao availability check)",
+        "commands": [
+          "Grep(pattern='doubao_service\\.availability_status\\(\\)', path='app/', output_mode='content', -C=3)",
+          "Grep(pattern='asyncio\\.create_task', path='app/', output_mode='content', -n=true)"
+        ],
+        "output_to": "code_duplication_analysis",
+        "on_error": "fail_task"
+      }
+    ],
+    "implementation_approach": [
+      {
+        "step": 1,
+        "title": "实现全局异常处理系统",
+        "description": "创建自定义异常类和全局异常处理器",
+        "modification_points": [
+          "新增 app/core/exceptions.py (60 行代码): [ServiceError 基类, DoubaoServiceUnavailable, NoteNotFoundError, DatabaseError]",
+          "修改 app/main.py: 新增 @app.exception_handler(ServiceError) (15 行代码)",
+          "修改 app/core/dependencies.py: check_doubao_available() 抛出 DoubaoServiceUnavailable",
+          "修改 app/services/note_service.py: get_note_by_id() 抛出 NoteNotFoundError",
+          "新增 tests/integration/test_exception_handlers.py (3 个测试用例): [test_service_error_handler(), test_note_not_found_handler(), test_doubao_unavailable_handler()]"
+        ],
+        "logic_flow": [
+          "读取 system-architect/analysis.md 第 XXX 行 (全局异常处理设计)",
+          "创建 exceptions.py 定义 4 个自定义异常类 (60 行)",
+          "在 main.py 新增异常处理器函数 (15 行)",
+          "修改 dependencies.py 和 service 层抛出自定义异常 (3 处修改)",
+          "编写 3 个测试用例验证异常处理器: ServiceError 捕获 + 标准化响应格式 + 日志记录",
+          "新增学习注释: 说明自定义异常的优势 (语义清晰, 统一处理, 便于监控)"
+        ],
+        "depends_on": [],
+        "output": "global_exception_handlers",
+        "学习要点": [
+          "自定义异常好处: 区分业务异常 (ServiceError) 和系统异常 (Exception), 便于分类处理",
+          "全局异常处理器: FastAPI 的 @app.exception_handler 可以统一捕获特定异常类型并返回标准格式",
+          "异常响应格式: {error: '异常类名', detail: '错误详情', timestamp: 'ISO 8601 时间戳'}"
+        ]
+      },
+      {
+        "step": 2,
+        "title": "实现依赖注入模式���除代码重复",
+        "description": "提取 doubao 可用性检查为依赖注入函数",
+        "modification_points": [
+          "新增 app/core/dependencies.py (如果不存在): check_doubao_available() 依赖函数 (15 行代码)",
+          "修改 app/api/v1/endpoints/library.py 第 76-81 行: 删除重复的 availability_status 检查代码",
+          "修改 app/api/v1/endpoints/library.py 第 133-138 行: 删除重复的 availability_status 检查代码",
+          "修改 library.py 端点装饰器: 添加 dependencies=[Depends(check_doubao_available)] (2 处)",
+          "新增 tests/integration/test_dependencies.py (2 个测试用例): [test_doubao_dependency_injection(), test_endpoint_blocked_when_doubao_unavailable()]"
+        ],
+        "logic_flow": [
+          "读取 subject-matter-expert/analysis.md 第 89-132 行 (依赖注入模式示例)",
+          "创建或更新 dependencies.py 新增 check_doubao_available() 函数 (15 行)",
+          "删除 library.py 中 2 处重复的 availability check 代码 (共 12 行)",
+          "在端点装饰器添加 dependencies=[Depends(...)] 参数 (2 处修改)",
+          "编写 2 个测试用例验证: 依赖注入正常工作 + 服务不可用时端点被阻塞",
+          "新增学习注释: 说明依赖注入的作用 (代码复用, 关注点分离, 便于测试)"
+        ],
+        "depends_on": [
+          1
+        ],
+        "output": "dependency_injection_implemented",
+        "学习要点": [
+          "FastAPI 依赖注入: Depends() 是核心特性, 用于参数验证、权限检查、资源初始化",
+          "依赖函数返回值: 可以返回值 (如 get_current_user 返回用户对象) 或仅执行副作用 (如可用性检查)",
+          "dependencies 参数: 使用 dependencies=[Depends(...)] 可以在不需要返回值时注入依赖"
+        ]
+      },
+      {
+        "step": 3,
+        "title": "迁移异步任务到 BackgroundTasks",
+        "description": "将 asyncio.create_task 替换为 FastAPI BackgroundTasks",
+        "modification_points": [
+          "修改 app/api/v1/endpoints/library.py 第 97-105 行: asyncio.create_task(...) → background_tasks.add_task(...)",
+          "修改 library.py create_note_from_image() 函数签名: 新增 background_tasks: BackgroundTasks 参数",
+          "导入 FastAPI BackgroundTasks: from fastapi import BackgroundTasks",
+          "删除 asyncio.create_task 导入 (如果无其他用途)",
+          "新增 tests/integration/test_background_tasks.py (2 个测试用例): [test_background_task_executed(), test_background_task_exception_handling()]"
+        ],
+        "logic_flow": [
+          "读取 subject-matter-expert/analysis.md 第 450-519 行 (BackgroundTasks 最佳实践)",
+          "修改 library.py 端点函数签名新增 BackgroundTasks 参数 (1 处修改)",
+          "替换 asyncio.create_task 为 background_tasks.add_task (1 处修改)",
+          "更新导入语句 (1 处新增, 可选 1 处删除)",
+          "编写 2 个测试用例验证: 任务被添加并执行 + 任务异常被捕获",
+          "新增学习注释: 说明 BackgroundTasks 优势 (异常捕获, 优雅关闭, 易于���试)"
+        ],
+        "depends_on": [
+          1,
+          2
+        ],
+        "output": "background_tasks_migrated",
+        "学习要点": [
+          "asyncio.create_task 问题: 任务异常会被吞没 (silent failure), 应用关闭时可能丢失未完成任务",
+          "BackgroundTasks 优势: 自动捕获异常并记录日志, 应用关闭时等待任务完成 (优雅关闭)",
+          "适用场景: BackgroundTasks 适合请求关联的短期任务 (如发送邮件), 长期后台服务需用 Celery"
+        ]
+      },
+      {
+        "step": 4,
+        "title": "统一日志记录系统",
+        "description": "创建日志配置并在所有 service 添加日志记录",
+        "modification_points": [
+          "新增 app/core/logging_config.py (40 行代码): setup_logging() 函数配置日志格式和 handlers",
+          "修改 app/main.py lifespan: 调用 setup_logging() 初始化日志系统 (1 行新增)",
+          "修改 app/services/note_service.py: 新增 logger = logging.getLogger(__name__) + 3 处日志记录点",
+          "修改 app/services/doubao_service.py: 补充日志记录 (已有部分, 补充 2 处)",
+          "修改 app/core/security.py: 新增登录失败日志记录 (1 处)",
+          "新增 tests/integration/test_logging.py (1 个测试用例): test_logging_captures_key_operations()"
+        ],
+        "logic_flow": [
+          "读取 subject-matter-expert/analysis.md 第 520-599 行 (日志记录系统设计)",
+          "创建 logging_config.py 配置日志格式 (JSON 可选) 和输出 handlers (40 行)",
+          "在 main.py lifespan 启动时调用 setup_logging() (1 行)",
+          "在所有 service 文件新增 logger 实例和关键操作日志 (预计 6 处修改, 共 10 行)",
+          "编写 1 个测试用例验证日志记录: 关键业务操作被记录",
+          "新增学习注释: 说明日志级别策略 (DEBUG/INFO/WARNING/ERROR 使用场景)"
+        ],
+        "depends_on": [
+          1,
+          2,
+          3
+        ],
+        "output": "unified_logging_system",
+        "学习要点": [
+          "日志级别策略: DEBUG (开发调试), INFO (关键操作), WARNING (可恢复错误), ERROR (需人工介入)",
+          "结构化日志: 生产环境使用 JSON 格式便于 ELK/Splunk 等工具解析",
+          "日志记录点: 用户认证、数据库操作、外部 API 调用、异常处理"
+        ]
+      },
+      {
+        "step": 5,
+        "title": "集成测试和验证",
+        "description": "运行所有架构改进相关测试",
+        "modification_points": [
+          "运行异常处理器测试: pytest tests/integration/test_exception_handlers.py -v",
+          "运行依赖注入测试: pytest tests/integration/test_dependencies.py -v",
+          "运行 BackgroundTasks 测试: pytest tests/integration/test_background_tasks.py -v",
+          "运行日志测试: pytest tests/integration/test_logging.py -v",
+          "生成架构改进报告"
+        ],
+        "logic_flow": [
+          "执行所有新增测试用例 (8 个测试)",
+          "执行完整测试套件验证无回归",
+          "生成改进报告: 5 个架构改进已实现, 8 个测试用例新增"
+        ],
+        "depends_on": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "output": "architecture_improvement_report"
+      }
+    ],
+    "target_files": [
+      "app/core/exceptions.py",
+      "app/core/dependencies.py",
+      "app/core/logging_config.py",
+      "app/main.py:exception_handler,lifespan",
+      "app/api/v1/endpoints/library.py:76-81,97-105,133-138",
+      "app/services/note_service.py:logging",
+      "app/services/doubao_service.py:logging",
+      "app/core/security.py:logging",
+      "tests/integration/test_exception_handlers.py",
+      "tests/integration/test_dependencies.py",
+      "tests/integration/test_background_tasks.py",
+      "tests/integration/test_logging.py"
+    ]
+  }
+}

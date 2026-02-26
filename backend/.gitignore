@@ -1,0 +1,72 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ========================================
+# 测试相关 (新增)
+# ========================================
+.pytest_cache/       # pytest 缓存
+.coverage            # coverage.py 覆盖率数据文件
+htmlcov/             # HTML 覆盖率报告
+coverage.xml         # XML 覆盖率报告 (CI 上传使用)
+.tox/                # tox 测试环境
+*.cover              # Coverage 输出文件
+.hypothesis/         # Hypothesis 测试框架
+.pytest_cache/       # pytest 缓存目录
+
+# 黄金文件测试生成的 baseline (保留在版本控制中)
+# tests/golden/baselines/*.json  # 注释掉, baseline 应提交到版本控制
+
+# 安全扫描报告
+bandit-report.json   # bandit 扫描输出
+safety-report.json   # safety 扫描输出
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# 数据库
+*.db
+*.sqlite
+*.sqlite3
+app.db
+
+# 日志
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
