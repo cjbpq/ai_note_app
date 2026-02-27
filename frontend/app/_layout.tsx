@@ -10,13 +10,22 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { MD3DarkTheme, MD3LightTheme, PaperProvider } from "react-native-paper";
-import { GlobalSnackbar } from "../components/common";
+import { GlobalSnackbar, OfflineBanner } from "../components/common";
 import { useAndroidSystemNavigationBar } from "../hooks/useAndroidSystemNavigationBar";
 import { useThemeMode } from "../hooks/useThemeMode";
 import "../i18n"; // 初始化国际化配置
 import { authEventEmitter } from "../services/api";
-import { clearLocalNotes, initDatabase } from "../services/database";
+import {
+  clearLocalNotes,
+  clearSyncQueue,
+  initDatabase,
+} from "../services/database";
 import { useAuthStore } from "../store/useAuthStore";
+import {
+  cleanupNetworkListener,
+  initNetworkListener,
+  useNetworkStore,
+} from "../store/useNetworkStore";
 
 // 创建 React Query 客户端实例
 const queryClient = new QueryClient();
@@ -40,6 +49,11 @@ export default function RootLayout() {
   useEffect(() => {
     initDatabase();
     loadAuth(); // 恢复认证状态
+    initNetworkListener(); // 启动网络状态监听
+
+    return () => {
+      cleanupNetworkListener(); // 清理网络监听器
+    };
   }, [loadAuth]);
 
   // ========================================
@@ -58,6 +72,10 @@ export default function RootLayout() {
       clearLocalNotes().catch(() => {
         // ignore
       });
+      // Phase B: 同步队列也需清理（账号隔离）
+      clearSyncQueue().catch(() => {
+        // ignore
+      });
 
       clearAuth();
       // 确保导航器已准备好再跳转
@@ -71,6 +89,22 @@ export default function RootLayout() {
       authEventEmitter.off("AUTH_EXPIRED", handleAuthExpired);
     };
   }, [clearAuth, router, navigationState?.key]);
+
+  // ========================================
+  // Phase B: 同步重放完成后刷新 React Query 缓存
+  // 当 sync engine 完成离线操作重放后，需要刷新列表/详情缓存
+  // 以确保 UI 显示服务端最新状态
+  // ========================================
+  const lastSyncResult = useNetworkStore((s) => s.lastSyncResult);
+  useEffect(() => {
+    if (lastSyncResult && lastSyncResult.succeeded > 0) {
+      console.log(
+        "[RootLayout] Sync replay completed, invalidating query caches...",
+      );
+      queryClient.invalidateQueries({ queryKey: ["notes"] });
+      queryClient.invalidateQueries({ queryKey: ["note"] });
+    }
+  }, [lastSyncResult]);
 
   // ========================================
   // 路由守卫：监听认证状态变化
@@ -157,6 +191,8 @@ export default function RootLayout() {
             }}
           />
         </Stack>
+        {/* 离线状态横幅 - 全局覆盖，网络断开时顶部显示提示 */}
+        <OfflineBanner />
         {/* 全局 Snackbar 组件 - 放在 Stack 外部确保覆盖所有页面 */}
         <GlobalSnackbar />
       </PaperProvider>

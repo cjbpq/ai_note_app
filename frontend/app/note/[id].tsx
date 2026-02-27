@@ -41,6 +41,7 @@ import {
 // ===== Hooks & Store =====
 import { useNotes } from "../../hooks/useNotes";
 import { useToast } from "../../hooks/useToast";
+import { useNetworkStore } from "../../store/useNetworkStore";
 import type { NoteEditFormData } from "../../store/useNoteEditStore";
 import { useNoteEditStore } from "../../store/useNoteEditStore";
 import { useUploadTaskStore } from "../../store/useUploadTaskStore";
@@ -100,6 +101,21 @@ export default function NoteDetailScreen() {
     error,
     refetch,
   } = useNote(id ?? null);
+
+  // ===== 离线 & 缓存完整性检测 =====
+  const isOnline = useNetworkStore((s) => s.isOnline);
+
+  /**
+   * 判断当前笔记是否为"未完整缓存"状态：
+   * - 离线时，如果笔记没有 structuredData 且 content 为空，
+   *   说明本地缓存只有列表级数据（标题/首图/标签），缺少详情内容。
+   * - 在线时不影响（会自动从 API 获取完整数据）。
+   */
+  const isPartialCache =
+    !isOnline &&
+    !!note &&
+    !note.structuredData &&
+    (!note.content || note.content.trim().length === 0);
 
   // ===== 编辑状态 Store =====
   const {
@@ -222,7 +238,12 @@ export default function NoteDetailScreen() {
         onSuccess: () => {
           finishEditing();
           refetch();
-          showSuccess(t("toast.save_success"));
+          // 离线时提示"已保存到本地"，在线时提示普通成功
+          showSuccess(
+            isOnline
+              ? t("toast.save_success")
+              : t("toast.save_offline_success"),
+          );
         },
         onError: () => {
           showError(t("toast.save_failed"));
@@ -236,6 +257,7 @@ export default function NoteDetailScreen() {
     updateNote,
     finishEditing,
     refetch,
+    isOnline,
     t,
     showSuccess,
     showError,
@@ -389,18 +411,19 @@ export default function NoteDetailScreen() {
                       : theme.colors.onSurface
                   }
                   onPress={handleToggleFavorite}
-                  disabled={isTogglingFavorite}
+                  disabled={isTogglingFavorite || isPartialCache}
                 />
                 <IconButton
                   icon="pencil-outline"
                   iconColor={theme.colors.primary}
                   onPress={handleEdit}
+                  disabled={isPartialCache}
                 />
                 <IconButton
                   icon="delete-outline"
                   iconColor={theme.colors.error}
                   onPress={handleDelete}
-                  disabled={isDeleting}
+                  disabled={isDeleting || isPartialCache}
                 />
               </View>
             ),
@@ -412,6 +435,32 @@ export default function NoteDetailScreen() {
         contentContainerStyle={styles.contentContainer}
         keyboardShouldPersistTaps="handled"
       >
+        {/* 离线缓存不完整提示条 */}
+        {isPartialCache && (
+          <View
+            style={[
+              styles.partialCacheBanner,
+              { backgroundColor: theme.colors.secondaryContainer },
+            ]}
+          >
+            <IconButton
+              icon="cloud-off-outline"
+              size={18}
+              iconColor={theme.colors.onSecondaryContainer}
+              style={styles.partialCacheIcon}
+            />
+            <Text
+              variant="bodySmall"
+              style={[
+                styles.partialCacheText,
+                { color: theme.colors.onSecondaryContainer },
+              ]}
+            >
+              {t("noteDetail.offline_partial_cache")}
+            </Text>
+          </View>
+        )}
+
         {/* 编辑模式：隐藏图片，最大化输入空间 */}
         {!isEditing && <NoteImage imageUrls={note.imageUrls ?? []} />}
 
@@ -480,5 +529,21 @@ const styles = StyleSheet.create({
   },
   headerRightContainer: {
     flexDirection: "row",
+  },
+  partialCacheBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 8,
+  },
+  partialCacheIcon: {
+    margin: 0,
+    marginRight: 4,
+  },
+  partialCacheText: {
+    flex: 1,
   },
 });

@@ -48,3 +48,7 @@ app-example
 *.woff.base64
 *.woff2.base64
 *.ttf.base64
+
+
+# Log
+/LOG/

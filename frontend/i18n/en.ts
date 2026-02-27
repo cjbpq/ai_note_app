@@ -55,6 +55,16 @@ export default {
     name_duplicate: "This category already exists",
     create_success: "Category created",
   },
+  network: {
+    offline_banner: "No network connection — showing cached data",
+    offline_with_pending: "No connection · {{count}} pending sync",
+    back_online: "Back online",
+    syncing: "Syncing offline changes...",
+    sync_complete: "Offline changes synced successfully",
+    sync_partial: "Some changes failed to sync, will retry later",
+    upload_blocked: "No network connection. Cannot upload images.",
+    upload_blocked_short: "Requires network",
+  },
   common: {
     close: "Close",
     cancel: "Cancel",
@@ -95,6 +105,7 @@ export default {
       deleteFailed: "Failed to delete note",
       favoriteFailed: "Failed to update favorite status",
       searchFailed: "Search failed. Please try again later.",
+      offlineNotCached: "You are offline and this note is not cached locally",
     },
     upload: {
       failed: "Upload failed. Please try again",
@@ -217,6 +228,9 @@ export default {
     original_text_title: "Original Recognized Text",
     warnings_title: "AI Processing Notes",
     subject_label: "Subject",
+    // Offline cache degradation
+    offline_partial_cache:
+      "Offline mode · Basic info only. Connect to network for full content.",
   },
   noteEdit: {
     section_basic: "Basic Info",
@@ -319,6 +333,7 @@ export default {
       "Gallery permission is needed to pick images. Please enable it in system settings.",
     scan_failed: "Scan failed, please try again",
     save_success: "Saved successfully",
+    save_offline_success: "Saved locally. Will sync when online.",
     save_failed: "Failed to save",
     delete_success: "Deleted successfully",
     favorite_added: "Added to favorites",

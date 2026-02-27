@@ -137,10 +137,23 @@ export const useNotes = () => {
     },
     onSuccess: (data) => {
       if (data) {
-        queryClient.setQueryData<Note>(noteKey(data.id), data);
+        // 合并写入详情缓存：保留已有的 structuredData / content，
+        // 防止列表级 API 响应覆盖详情级缓存（Bug2 修复）
+        queryClient.setQueryData<Note>(noteKey(data.id), (old) => {
+          if (!old) return data;
+          return {
+            ...old,
+            ...data,
+            // 防护：若 API 未返回详情数据，保留已有缓存
+            structuredData: data.structuredData ?? old.structuredData,
+            content: data.content || old.content,
+          };
+        });
         queryClient.setQueryData<Note[]>(notesKey, (old) => {
           if (!old) return old;
-          return old.map((item) => (item.id === data.id ? data : item));
+          return old.map((item) =>
+            item.id === data.id ? { ...item, ...data } : item,
+          );
         });
       }
 

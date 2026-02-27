@@ -5,7 +5,7 @@ import i18next from "../i18n";
 import { authEventEmitter } from "../services/api";
 import { authService } from "../services/authService";
 import { clearLocalNewCategories } from "../services/categoryService";
-import { clearLocalNotes } from "../services/database";
+import { clearLocalNotes, clearSyncQueue } from "../services/database";
 import { searchHistoryService } from "../services/searchHistoryService";
 import { useAuthStore } from "../store/useAuthStore";
 import { AuthForm, LoginResponse, ServiceError } from "../types";
@@ -52,6 +52,11 @@ export const useAuth = () => {
 
     clearLocalNotes().catch((e) => {
       console.warn("[useAuth] Failed to clear local notes cache:", e);
+    });
+
+    // Phase B: 清空离线同步队列（账号隔离，避免旧账号操作被新账号重放）
+    clearSyncQueue().catch((e) => {
+      console.warn("[useAuth] Failed to clear sync queue:", e);
     });
   }, [queryClient]);
 
