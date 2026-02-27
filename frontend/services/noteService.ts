@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import { APP_CONFIG, ENDPOINTS } from "../constants/config";
 import i18next from "../i18n";
+import { useNetworkStore } from "../store/useNetworkStore";
 import {
   JobStatusResponse,
   Note,
@@ -19,10 +20,12 @@ import {
 import api from "./api";
 import {
   deleteNoteLocally,
+  enqueueSyncOperation,
   fetchLocalNoteById,
   fetchLocalNotes,
   saveNoteLocally,
   saveNotesToLocal,
+  updateNoteSyncStatus,
 } from "./database";
 import { parseServiceError } from "./errorService";
 
@@ -264,6 +267,35 @@ const reverseStructuredData = (
   };
 };
 
+/**
+ * 判断笔记是否包含「详情级」数据
+ *
+ * 列表 API 仅返回标题/标签/首图等元数据（不含 structuredData / content），
+ * 只有通过详情 API 获取的笔记才包含完整的结构化数据或正文内容。
+ *
+ * 用途：
+ *   - 离线时判断本地缓存是否为「完整缓存」（值得展示给用户）
+ *   - 在线 API 失败回退本地时，判断是否有足够丰富的缓存可用
+ *   - 如果仅有列表级数据 → 不应作为详情页数据源（避免展示空白内容）
+ */
+const hasDetailLevelData = (note: Note): boolean => {
+  // 有结构化数据（含实际内容字段）
+  if (
+    note.structuredData &&
+    (note.structuredData.summary ||
+      note.structuredData.sections ||
+      note.structuredData.keyPoints ||
+      note.structuredData.rawText)
+  ) {
+    return true;
+  }
+  // 有正文内容
+  if (note.content && note.content.trim().length > 0) {
+    return true;
+  }
+  return false;
+};
+
 // ============================================================================
 // Mock Data - 使用可变数组，支持运行时增删改
 // ============================================================================
@@ -354,12 +386,27 @@ export const noteService = {
 
   /**
    * 获取笔记列表
+   *
+   * 策略：
+   *   1. 在线 → 请求 API → 成功后 UPSERT 本地缓存 → 返回
+   *   2. 在线但 API 失败 → 降级读取本地 SQLite 缓存 → 返回
+   *   3. 离线 → 直接读取本地 SQLite 缓存，跳过 API（避免 10s 超时等待）
    */
   fetchNotes: async (): Promise<Note[]> => {
     if (USE_MOCK) {
       console.log("[Mock API] fetchNotes called");
       await new Promise((resolve) => setTimeout(resolve, 800));
       return MOCK_NOTES;
+    }
+
+    // 网络感知：离线时直接走本地缓存，无需等待 API 超时
+    const isOnline = useNetworkStore.getState().isOnline;
+
+    if (!isOnline) {
+      console.log("[Service] Offline detected, reading local cache directly");
+      const localNotes = await fetchLocalNotes();
+      // 离线时即使本地为空也不抛错（用户可能刚安装、未曾联网过）
+      return localNotes;
     }
 
     try {
@@ -406,6 +453,11 @@ export const noteService = {
 
   /**
    * 获取笔记详情
+   *
+   * 策略：
+   *   - 在线 → 请求 API → 成功后写本地缓存
+   *   - 离线 → 直接读本地 SQLite 缓存（若命中）
+   *
    * @param noteId - 笔记ID
    */
   getNoteById: async (noteId: string): Promise<Note> => {
@@ -426,7 +478,22 @@ export const noteService = {
       };
     }
 
-    // 真实 API：获取并规范化
+    // 网络感知：离线时直接读本地缓存
+    const isOnline = useNetworkStore.getState().isOnline;
+
+    if (!isOnline) {
+      console.log("[Service] Offline — reading note from local cache:", noteId);
+      const localNote = await fetchLocalNoteById(noteId);
+      // 只返回包含详情级数据的缓存（列表级缓存不足以展示详情页）
+      if (localNote && hasDetailLevelData(localNote)) return localNote;
+      // 无缓存或仅列表级缓存 → 提示「未缓存」
+      throw parseServiceError(null, {
+        fallbackKey: "error.note.offlineNotCached",
+        statusMap: {},
+      });
+    }
+
+    // 在线 → 请求 API
     try {
       const response = await api.get<RawNoteFromAPI>(
         `${ENDPOINTS.LIBRARY.GET_NOTE}/${noteId}`,
@@ -441,6 +508,16 @@ export const noteService = {
 
       return note;
     } catch (error) {
+      // API 失败时尝试读本地缓存作为兆底（仅返回详情级缓存，避免展示空白）
+      const localNote = await fetchLocalNoteById(noteId);
+      if (localNote && hasDetailLevelData(localNote)) {
+        console.log(
+          "[Service] API failed, returning cached detail note:",
+          noteId,
+        );
+        return localNote;
+      }
+
       throw parseServiceError(error, {
         fallbackKey: "error.note.loadFailed",
         statusMap: {
@@ -499,6 +576,10 @@ export const noteService = {
 
   /**
    * 删除笔记
+   *
+   * 离线模式 (Phase B)：
+   *   - 先从本地 SQLite 删除 → 用户立即看到笔记消失
+   *   - 同时将 delete 操作入队 sync_queue → 恢复在线后重放
    */
   deleteNote: async (id: string): Promise<void> => {
     if (USE_MOCK) {
@@ -511,15 +592,25 @@ export const noteService = {
       }
       return;
     }
-    // 本地优先删除，失败时回滚
-    const localNote = await fetchLocalNoteById(id);
 
+    const isOnline = useNetworkStore.getState().isOnline;
+
+    if (!isOnline) {
+      // ── 离线模式：本地删除 + 入队 ──
+      console.log("[Service] Offline delete — local + enqueue:", id);
+      await deleteNoteLocally(id);
+      await enqueueSyncOperation("delete", id);
+      return;
+    }
+
+    // ── 在线模式：本地优先删除，API 失败时回滚 ──
+    const localNote = await fetchLocalNoteById(id);
     await deleteNoteLocally(id);
 
     try {
       await api.delete(`${ENDPOINTS.LIBRARY.GET_NOTE}/${id}`);
     } catch (error) {
-      // API 失败时回滚本地删除，保证离线一致性
+      // API 失败时回滚本地删除，保证一致性
       if (localNote) {
         saveNoteLocally(localNote).catch((err: unknown) =>
           console.warn("Rollback local failed:", err),
@@ -537,6 +628,11 @@ export const noteService = {
 
   /**
    * 更新笔记
+   *
+   * 离线模式 (Phase B)：
+   *   - 将更新合并到本地 SQLite 缓存 → 用户立即看到新数据
+   *   - 标记 isSynced=0（有未同步变更）
+   *   - edit 操作入队 sync_queue → 恢复在线后重放
    */
   updateNote: async (id: string, updatedNote: Partial<Note>): Promise<Note> => {
     if (USE_MOCK) {
@@ -550,6 +646,28 @@ export const noteService = {
       throw new Error("Note not found in mock");
     }
 
+    const isOnline = useNetworkStore.getState().isOnline;
+
+    if (!isOnline) {
+      // ── 离线模式：本地合并 + 标记未同步 + 入队 ──
+      console.log("[Service] Offline edit — local merge + enqueue:", id);
+      const localNote = await fetchLocalNoteById(id);
+      if (!localNote) {
+        throw parseServiceError(null, {
+          fallbackKey: "error.note.offlineNotCached",
+          statusMap: {},
+        });
+      }
+      // 合并更新到本地
+      const merged: Note = { ...localNote, ...updatedNote };
+      await saveNoteLocally(merged);
+      await updateNoteSyncStatus(id, false); // isSynced=0
+      // 入队：payload 存更新字段的 API 格式
+      await enqueueSyncOperation("edit", id, toAPIFormat(updatedNote));
+      return merged;
+    }
+
+    // ── 在线模式 ──
     // 关键：将前端 Note 格式转换为后端 API 期望的格式
     const apiPayload = toAPIFormat(updatedNote);
     console.log("[Service] updateNote API payload:", apiPayload);
@@ -584,6 +702,10 @@ export const noteService = {
 
   /**
    * 切换收藏状态
+   *
+   * 离线模式 (Phase B)：
+   *   - 本地切换 isFavorite → 用户立即看到收藏变化
+   *   - 标记 isSynced=0 + 入队 sync_queue
    */
   toggleFavorite: async (id: string): Promise<Note> => {
     if (USE_MOCK) {
@@ -599,6 +721,29 @@ export const noteService = {
       return updated;
     }
 
+    const isOnline = useNetworkStore.getState().isOnline;
+
+    if (!isOnline) {
+      // ── 离线模式：本地切换 + 入队 ──
+      console.log("[Service] Offline favorite toggle — local + enqueue:", id);
+      const localNote = await fetchLocalNoteById(id);
+      if (!localNote) {
+        throw parseServiceError(null, {
+          fallbackKey: "error.note.offlineNotCached",
+          statusMap: {},
+        });
+      }
+      const nextFavorite = !(localNote.isFavorite ?? false);
+      const merged: Note = { ...localNote, isFavorite: nextFavorite };
+      await saveNoteLocally(merged);
+      await updateNoteSyncStatus(id, false);
+      await enqueueSyncOperation("favorite", id, {
+        is_favorite: nextFavorite,
+      });
+      return merged;
+    }
+
+    // ── 在线模式 ──
     try {
       const response = await api.post<RawNoteFromAPI>(
         ENDPOINTS.LIBRARY.TOGGLE_FAVORITE(id),

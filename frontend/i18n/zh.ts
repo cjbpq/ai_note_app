@@ -54,6 +54,16 @@ export default {
     name_duplicate: "该分类已存在",
     create_success: "分类创建成功",
   },
+  network: {
+    offline_banner: "当前无网络连接，显示的是缓存数据",
+    offline_with_pending: "无网络连接 · {{count}} 个操作待同步",
+    back_online: "网络已恢复",
+    syncing: "正在同步离线操作...",
+    sync_complete: "离线操作同步完成",
+    sync_partial: "部分操作同步失败，将稍后重试",
+    upload_blocked: "当前无网络连接，无法上传图片",
+    upload_blocked_short: "需联网上传",
+  },
   common: {
     close: "关闭",
     cancel: "取消",
@@ -94,6 +104,7 @@ export default {
       deleteFailed: "删除笔记失败",
       favoriteFailed: "收藏操作失败，请稍后重试",
       searchFailed: "搜索失败，请稍后重试",
+      offlineNotCached: "当前离线，该笔记未缓存到本地",
     },
     upload: {
       failed: "上传失败，请稍后重试",
@@ -215,6 +226,9 @@ export default {
     original_text_title: "原始识别文本",
     warnings_title: "AI 处理提示",
     subject_label: "学科",
+    // 离线缓存降级
+    offline_partial_cache:
+      "离线模式 · 仅显示基础信息，连接网络后可查看完整内容",
   },
   noteEdit: {
     section_basic: "基本信息",
@@ -315,6 +329,7 @@ export default {
     gallery_permission_required: "需要相册权限才能选图，请在系统设置中开启",
     scan_failed: "扫描失败，请重试",
     save_success: "保存成功",
+    save_offline_success: "已保存到本地，联网后自动同步",
     save_failed: "保存失败",
     delete_success: "删除成功",
     favorite_added: "已收藏",

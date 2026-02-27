@@ -21,7 +21,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { CategoryPicker, UploadTaskTray } from "../../components/upload";
 import { useCategories } from "../../hooks/useCategories";
 import { type ImagePickMode, useImagePicker } from "../../hooks/useImagePicker";
+import { useToast } from "../../hooks/useToast";
 import { useUploadTasks } from "../../hooks/useUploadTasks";
+import { useNetworkStore } from "../../store/useNetworkStore";
 import { useScanStore } from "../../store/useScanStore";
 
 /**
@@ -43,6 +45,11 @@ export default function HomeScreen() {
   // =========================================================================
   // 1. Hook 与状态管理
   // =========================================================================
+
+  // 网络状态：离线时禁用上传工作流
+  const isOnline = useNetworkStore((s) => s.isOnline);
+  const { showWarning } = useToast();
+
   const { pickedImageUris } = useScanStore();
   const {
     pickImage,
@@ -90,6 +97,12 @@ export default function HomeScreen() {
   // =========================================================================
   const handleUpload = () => {
     if (!hasImages) return;
+
+    // Phase B: 离线时拦截上传，友好提示
+    if (!isOnline) {
+      showWarning(t("network.upload_blocked"));
+      return;
+    }
 
     // 提交多图任务（附带选中的分类）→ 立即清除图片 → 用户可继续选下一批
     submitTask(pickedImageUris, selectedCategory ?? undefined);
@@ -310,12 +323,14 @@ export default function HomeScreen() {
             <Button
               mode="contained"
               onPress={handleUpload}
+              disabled={!isOnline}
               style={styles.uploadButton}
               contentStyle={{ paddingVertical: 8 }}
-              icon="cloud-upload"
+              icon={isOnline ? "cloud-upload" : "cloud-off-outline"}
             >
-              {t("home.upload_button")}
-              {currentCount > 1 ? ` (${currentCount})` : ""}
+              {isOnline
+                ? `${t("home.upload_button")}${currentCount > 1 ? ` (${currentCount})` : ""}`
+                : t("network.upload_blocked_short")}
             </Button>
           )}
 
