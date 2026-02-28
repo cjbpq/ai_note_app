@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-02-28
+
+### Added
+
+- **Favorites UI**: Introduced a dedicated "My Favorites" list page accessible via the settings menu, reusing the existing note card components.
+- **Offline Mode (Phase B)**: Implemented initial local offline capabilities.
+  - Added support for offline writing operations, including edit, delete, and favorite actions.
+  - Implemented an automatic background sync engine (`syncEngine.ts`) to seamlessly replay offline actions upon network recovery.
+  - Added global offline banner and unified UI state indicators to reflect real-time network connectivity and syncing progress.
+
+### Changed
+
+- **Database Cache Strategy**: Migrated to a smart incremental merge strategy for local SQLite queries to preserve detailed rich data (including multiple images and structured content) across independent sessions smoothly.
+- **Improved Networking Architecture**: Integrated a centralized network store using `@react-native-community/netinfo` to skip API requests dynamically when navigating offline.
+
+### Fixed
+
+- **Data Integrity Issues**: Resolved various data overwrites and caching bugs associated with list navigation and note favorite toggles to ensure data reliability under extreme offline conditions.
+
 ## [0.1.0] - 2026-02-25
 
 ### Added

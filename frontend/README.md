@@ -101,15 +101,15 @@ i18n/           # Internationalization (zh/en)
 
 ## 🔄 Version
 
-**Current version:** v0.1.0
+**Current version:** v0.1.1
 
 **Latest Updates:**
 
-- ✨ Added concurrent, multi-image upload functionality
-- 🎨 Optimized edit mode experience
-- 🔍 Optimized search functionality to utilize local search
-- 🗂 Added basic category system and sidebar browsing
-- 🐛 Various UI optimizations and bug fixes
+- ✨ Added dedicated "My Favorites" list UI page
+- 📶 Implemented initial offline capabilities (Phase B)
+- 🔄 Introduced automatic background sync engine for offline actions
+- 💾 Enhanced local SQLite database and smart cache merging strategy
+- 🐛 Fixed various offline data integrity bugs
 
 ---
 
