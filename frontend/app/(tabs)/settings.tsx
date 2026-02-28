@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { Href, useRouter } from "expo-router";
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Image, ScrollView, StyleSheet, View } from "react-native";
@@ -41,6 +42,7 @@ export default function SettingsScreen() {
   const { user, isAuthenticated } = useAuthStore();
   const { logout } = useAuth();
   const { notes } = useNotes();
+  const router = useRouter();
 
   // 退出登录确认弹窗状态
   const [logoutDialogVisible, setLogoutDialogVisible] = useState(false);
@@ -187,7 +189,7 @@ export default function SettingsScreen() {
           },
         ]}
       >
-        {/* 我的笔记 */}
+        {/* 我的收藏 */}
         <List.Item
           title={t("settings.menu.my_notes")}
           left={(props) => (
@@ -195,7 +197,7 @@ export default function SettingsScreen() {
               {...props}
               icon={() => (
                 <Ionicons
-                  name="document-text-outline"
+                  name="heart-outline"
                   size={24}
                   color={theme.colors.primary}
                 />
@@ -204,8 +206,7 @@ export default function SettingsScreen() {
           )}
           right={(props) => <List.Icon {...props} icon="chevron-right" />}
           onPress={() => {
-            // TODO: 跳转到笔记列表页面
-            console.log("Navigate to My Notes");
+            router.push("/favorites" as Href);
           }}
         />
         <Divider />

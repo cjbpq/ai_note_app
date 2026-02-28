@@ -179,6 +179,10 @@ export default {
       rule_pass: "✓ 已满足",
     },
   },
+  favorites: {
+    title: "我的收藏",
+    empty: "暂无收藏笔记",
+  },
   screen: {
     read_title: "阅读页面",
     settings_title: "设置页面",

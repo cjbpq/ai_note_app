@@ -190,6 +190,14 @@ export default function RootLayout() {
               animation: "slide_from_right",
             }}
           />
+          {/* 收藏列表页 - 全屏 push，与搜索页同级 */}
+          <Stack.Screen
+            name="favorites"
+            options={{
+              headerShown: false,
+              animation: "slide_from_right",
+            }}
+          />
         </Stack>
         {/* 离线状态横幅 - 全局覆盖，网络断开时顶部显示提示 */}
         <OfflineBanner />
