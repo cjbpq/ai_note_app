@@ -142,3 +142,17 @@ export const filterNotesByCategory = (
 export const countUncategorizedNotes = (notes: Note[]): number => {
   return (notes ?? []).filter((n) => !n.category?.trim()).length;
 };
+
+/**
+ * 过滤收藏笔记（用于收藏列表页）
+ *
+ * 返回 isFavorite === true 的笔记，按时间倒序排列。
+ * 与 filterNotesByCategory 同级复用风格。
+ *
+ * @param notes - 全量笔记列表（来自 useNotes 缓存）
+ */
+export const filterFavoriteNotes = (notes: Note[]): Note[] => {
+  return (notes ?? [])
+    .filter((n) => n.isFavorite === true)
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+};

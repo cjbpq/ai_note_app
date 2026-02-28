@@ -180,6 +180,10 @@ export default {
       rule_pass: "✓ Passed",
     },
   },
+  favorites: {
+    title: "My Favorites",
+    empty: "No favorite notes yet",
+  },
   screen: {
     read_title: "Read Page",
     settings_title: "Settings Page",
