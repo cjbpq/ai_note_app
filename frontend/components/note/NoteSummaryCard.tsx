@@ -7,21 +7,24 @@
  * - 使用 Card 包裹，视觉上突出摘要信息
  * - 无摘要内容时不渲染
  * - 样式与 Paper 主题保持一致
+ * - 支持 LaTeX 公式渲染（通过 MathAwareText 智能检测）
  */
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native";
-import { Card, Text, useTheme } from "react-native-paper";
+import { Card, useTheme } from "react-native-paper";
+import { MathAwareText } from "../common/MathAwareText";
 
 // ========== Props 类型定义 ==========
 interface NoteSummaryCardProps {
-  /** AI 生成的摘要文本 */
+  /** AI 生成的摘要文本（可能含 LaTeX） */
   summary?: string;
 }
 
 /**
  * NoteSummaryCard 组件
  * 渲染 AI 摘要区域，使用 Card 容器突出展示
+ * 支持 LaTeX 公式智能检测：纯文本用 Text，含公式用 MathWebView
  */
 export const NoteSummaryCard: React.FC<NoteSummaryCardProps> = ({
   summary,
@@ -40,12 +43,13 @@ export const NoteSummaryCard: React.FC<NoteSummaryCardProps> = ({
         titleStyle={{ color: theme.colors.primary }}
       />
       <Card.Content>
-        <Text
+        {/* MathAwareText: 纯文本→Text，含公式→compact MathWebView */}
+        <MathAwareText
+          content={summary}
           variant="bodyMedium"
-          style={{ color: theme.colors.onSurface, lineHeight: 22 }}
-        >
-          {summary}
-        </Text>
+          textStyle={{ color: theme.colors.onSurface, lineHeight: 22 }}
+          fontSize={15}
+        />
       </Card.Content>
     </Card>
   );
