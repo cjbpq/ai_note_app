@@ -9,5 +9,6 @@ export { GlobalSnackbar } from "./GlobalSnackbar";
 export { ImageCarousel } from "./ImageCarousel";
 export { ImageViewerModal } from "./ImageViewerModal";
 export { LoadingScreen } from "./LoadingScreen";
+export { MathAwareText } from "./MathAwareText";
 export { default as OfflineBanner } from "./OfflineBanner";
 export { ThemeModeToggle } from "./ThemeModeToggle";

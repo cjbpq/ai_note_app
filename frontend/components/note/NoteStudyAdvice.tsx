@@ -6,12 +6,14 @@
  * 设计说明：
  * - 使用带图标的 Card 容器，视觉区分"建议"信息
  * - 无建议内容时不渲染
+ * - 支持 LaTeX 公式渲染（通过 MathAwareText 智能检测）
  */
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, View } from "react-native";
 import { Card, Text, useTheme } from "react-native-paper";
+import { MathAwareText } from "../common/MathAwareText";
 
 // ========== Props 类型定义 ==========
 interface NoteStudyAdviceProps {
@@ -56,17 +58,18 @@ export const NoteStudyAdvice: React.FC<NoteStudyAdviceProps> = ({
           </Text>
         </View>
 
-        {/* 建议正文 */}
-        <Text
-          variant="bodyMedium"
-          style={{
-            color: theme.colors.onTertiaryContainer,
-            lineHeight: 22,
-            marginTop: 8,
-          }}
-        >
-          {studyAdvice}
-        </Text>
+        {/* 建议正文：支持 LaTeX 公式智能检测 */}
+        <View style={styles.adviceContent}>
+          <MathAwareText
+            content={studyAdvice}
+            variant="bodyMedium"
+            textStyle={{
+              color: theme.colors.onTertiaryContainer,
+              lineHeight: 22,
+            }}
+            fontSize={15}
+          />
+        </View>
       </Card.Content>
     </Card>
   );
@@ -85,6 +88,9 @@ const styles = StyleSheet.create({
   titleText: {
     marginLeft: 8,
     fontWeight: "600",
+  },
+  adviceContent: {
+    marginTop: 8,
   },
 });
 

@@ -5,16 +5,16 @@
  *
  * 设计说明：
  * - 紧凑文本列表布局，减少空间占用
- * - 小圆点序号 + 文本，无 WebView 渲染开销
+ * - 小圆点序号 + 文本
+ * - 支持 LaTeX 公式渲染（通过 MathAwareText 逐条检测）
  * - 无要点时不渲染
- *
- * 后续升级：如需支持 LaTeX 公式要点，可将 Text 替换回 MathWebView
  */
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, View } from "react-native";
 import { Surface, Text, useTheme } from "react-native-paper";
 import { toSafeStringArray } from "../../utils/safeData";
+import { MathAwareText } from "../common/MathAwareText";
 
 // ========== Props 类型定义 ==========
 interface NoteKeyPointsProps {
@@ -62,13 +62,16 @@ export const NoteKeyPoints: React.FC<NoteKeyPointsProps> = ({ keyPoints }) => {
             </Text>
           </View>
 
-          {/* 要点文本（紧凑渲染） */}
-          <Text
-            variant="bodySmall"
-            style={[styles.pointText, { color: theme.colors.onSurface }]}
-          >
-            {point}
-          </Text>
+          {/* 要点文本：智能检测，含公式用 MathWebView，纯文本用 Text */}
+          <View style={styles.pointTextContainer}>
+            <MathAwareText
+              content={point}
+              variant="bodySmall"
+              textStyle={[styles.pointText, { color: theme.colors.onSurface }]}
+              fontSize={13}
+              minHeight={24}
+            />
+          </View>
         </View>
       ))}
     </Surface>
@@ -101,6 +104,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginRight: 8,
     marginTop: 1,
+  },
+  pointTextContainer: {
+    flex: 1,
   },
   pointText: {
     flex: 1,

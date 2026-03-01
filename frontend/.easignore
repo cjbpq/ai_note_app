@@ -1,17 +1,16 @@
 # Ignore all build artifacts and internal logs to minimize upload size
 
-node*modules
-.expo
-dist
-web-build
-ios
-android
-.vscode
-.git
-LOG
-scripts
+node_modules/
+.expo/
+dist/
+web-build/
+ios/
+android/
+.vscode/
+.git/
+LOG/
+scripts/
 *.md
-package-lock.json
-yarn.lock
 \_.woff2.base64
 \*.base64
+

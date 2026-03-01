@@ -12,6 +12,9 @@ import { AUTO_RENDER_JS, KATEX_CSS, KATEX_JS } from "../constants/mathAssets";
  * @param textColor - 文本颜色（适配主题）
  * @param backgroundColor - 背景颜色（适配主题）
  * @param style - 外部传入的样式容器
+ * @param compact - 紧凑模式：减少内边距和最小高度，适用于短文本（摘要、要点等）
+ * @param fontSize - 自定义字体大小（默认 16px，compact 模式默认 14px）
+ * @param minHeight - 自定义最小高度（默认 120px，compact 模式默认 32px）
  */
 interface MathWebViewProps {
   content: string;
@@ -19,10 +22,18 @@ interface MathWebViewProps {
   textColor?: string;
   backgroundColor?: string;
   style?: ViewStyle;
+  /** 紧凑模式：减少内边距和最小高度，适用于短文本场景 */
+  compact?: boolean;
+  /** 自定义字体大小（px） */
+  fontSize?: number;
+  /** 自定义最小高度（px） */
+  minHeight?: number;
 }
 
-// WebView 最小高度，确保始终可见
-const MIN_HEIGHT = 120;
+// WebView 默认最小高度
+const DEFAULT_MIN_HEIGHT = 120;
+// 紧凑模式最小高度
+const COMPACT_MIN_HEIGHT = 32;
 
 /**
  * MathWebView 组件
@@ -39,6 +50,9 @@ const MathWebView: React.FC<MathWebViewProps> = ({
   textColor,
   backgroundColor,
   style,
+  compact = false,
+  fontSize,
+  minHeight,
 }) => {
   const theme = useTheme();
 
@@ -51,7 +65,14 @@ const MathWebView: React.FC<MathWebViewProps> = ({
   const effectiveTextColor = textColor ?? theme.colors.onSurface;
   const effectiveBackgroundColor = backgroundColor ?? "transparent";
 
-  const [height, setHeight] = useState(MIN_HEIGHT);
+  // 根据 compact 模式计算实际最小高度和字体大小
+  const effectiveMinHeight =
+    minHeight ?? (compact ? COMPACT_MIN_HEIGHT : DEFAULT_MIN_HEIGHT);
+  const effectiveFontSize = fontSize ?? (compact ? 14 : 16);
+  // compact 模式下减少 body padding
+  const bodyPadding = compact ? "4px 0" : "16px";
+
+  const [height, setHeight] = useState(effectiveMinHeight);
   const webViewRef = useRef<WebView>(null);
 
   // ========== 核心：在 RN 侧预解析 Markdown ==========
@@ -91,6 +112,17 @@ const MathWebView: React.FC<MathWebViewProps> = ({
       return placeholder;
     });
 
+    // P1 加固：保护 \begin{...}...\end{...} LaTeX 环境
+    // 覆盖 pmatrix, bmatrix, vmatrix, cases, align, equation, array, matrix 等
+    text = text.replace(
+      /\\begin\{([a-zA-Z*]+)\}[\s\S]*?\\end\{\1\}/g,
+      (match) => {
+        const placeholder = `%%MATHENV${counter++}%%`;
+        mathBlocks.push({ placeholder, original: match });
+        return placeholder;
+      },
+    );
+
     // 用 marked 解析 Markdown → HTML
     marked.use({ breaks: true, gfm: true });
     let html = marked.parse(text) as string;
@@ -119,12 +151,12 @@ const MathWebView: React.FC<MathWebViewProps> = ({
         * { box-sizing: border-box; }
         body {
             font-family: -apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", sans-serif;
-            font-size: 16px;
+            font-size: ${effectiveFontSize}px;
             line-height: 1.6;
             color: ${effectiveTextColor};
             background-color: ${effectiveBackgroundColor};
             margin: 0;
-            padding: 16px;
+            padding: ${bodyPadding};
             overflow-y: hidden;
             word-wrap: break-word;
         }
@@ -200,7 +232,7 @@ const MathWebView: React.FC<MathWebViewProps> = ({
     <script>
         // ===== 高度通信 =====
         function sendHeight() {
-            var h = Math.max(document.body.scrollHeight, ${MIN_HEIGHT});
+            var h = Math.max(document.body.scrollHeight, ${effectiveMinHeight});
             if (window.ReactNativeWebView) {
                 window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'height', value: h }));
             }

@@ -5,13 +5,14 @@
  *
  * 设计说明：
  * - 默认折叠，用户可展开查看
- * - 文本使用等宽字体风格展示，区别于结构化内容
+ * - 支持 LaTeX 公式渲染（通过 MathAwareText 智能检测）
  * - 无原文时不渲染
  */
 import React, { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, View } from "react-native";
-import { List, Surface, Text, useTheme } from "react-native-paper";
+import { List, Surface, useTheme } from "react-native-paper";
+import { MathAwareText } from "../common/MathAwareText";
 
 // ========== Props 类型定义 ==========
 interface NoteOriginalTextProps {
@@ -49,20 +50,25 @@ export const NoteOriginalText: React.FC<NoteOriginalTextProps> = ({
         style={{ backgroundColor: "transparent" }}
         left={(props) => <List.Icon {...props} icon="text-box-outline" />}
       >
-        {/* 原始文本内容 */}
+        {/* 原始文本内容：支持 LaTeX 公式智能检测 */}
         <View style={styles.textContainer}>
-          <Text
-            variant="bodySmall"
+          <View
             style={[
-              styles.rawText,
-              {
-                color: theme.colors.onSurfaceVariant,
-                backgroundColor: theme.colors.surfaceVariant,
-              },
+              styles.rawTextContainer,
+              { backgroundColor: theme.colors.surfaceVariant },
             ]}
           >
-            {rawText}
-          </Text>
+            <MathAwareText
+              content={rawText}
+              variant="bodySmall"
+              textStyle={{
+                color: theme.colors.onSurfaceVariant,
+                lineHeight: 20,
+              }}
+              fontSize={13}
+              selectable
+            />
+          </View>
         </View>
       </List.Accordion>
     </Surface>
@@ -81,11 +87,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 16,
   },
-  rawText: {
+  rawTextContainer: {
     padding: 12,
     borderRadius: 8,
-    lineHeight: 20,
-    fontFamily: "monospace",
   },
 });
 
