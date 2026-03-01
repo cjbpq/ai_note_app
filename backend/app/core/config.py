@@ -1,7 +1,7 @@
 ﻿import os
 from typing import Optional
 
-from pydantic import AliasChoices, Field, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,6 +41,14 @@ class Settings(BaseSettings):
 
     # Timezone (用于 API 返回时间的时区转换，默认中国标准时间)
     TIMEZONE: str = "Asia/Shanghai"
+
+    # 邮件服务配置 (SMTP)
+    SMTP_HOST: str = "smtp.exmail.qq.com"
+    SMTP_PORT: int = 465
+    SMTP_USE_SSL: bool = True
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_NAME: str = "AI Note"
 
     # Database
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/ai_note_app"
@@ -85,6 +93,21 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("ADMIN_PORTAL_API_KEY", "PROMPT_ADMIN_KEY"),
     )
+
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def _parse_debug_flag(cls, value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            truthy = {"1", "true", "yes", "on", "debug", "dev", "development"}
+            falsy = {"0", "false", "no", "off", "release", "prod", "production"}
+            if normalized in truthy:
+                return True
+            if normalized in falsy:
+                return False
+        return value
 
     @model_validator(mode="after")
     def _apply_doubao_alias_fallbacks(cls, values: "Settings") -> "Settings":
