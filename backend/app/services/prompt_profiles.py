@@ -35,7 +35,10 @@ def _base_schema() -> Dict[str, Any]:
                         "items": {
                             "type": "object",
                             "properties": {
-                                "heading": {"type": "string"},
+                                "heading": {
+                                    "type": "string",
+                                    "description": "根据内容呈现最自然的小结标题，如'知识精讲'、'画面观察'、'核心概念'等",
+                                },
                                 "content": {"type": "string"},
                             },
                             "required": ["heading", "content"],
@@ -46,7 +49,10 @@ def _base_schema() -> Dict[str, Any]:
                         "type": "array",
                         "items": {"type": "string"},
                     },
-                    "study_advice": {"type": "string"},
+                    "study_advice": {
+                        "type": "string",
+                        "description": "如果是学习资料则提供复习建议；如果是普通生活场景/商业外景场景强烈要求返回空字符串",
+                    },
                     "meta": {
                         "type": "object",
                         "additionalProperties": True,
@@ -152,8 +158,8 @@ DEFAULT_PROFILES: Dict[str, Dict[str, Any]] = {
     "general": {
         "display_name": "学习笔记",
         "aliases": ["default", "学习笔记", "lecture", "note", "general_note", "study_note"],
-        "system_template": "你是一名专业的学习笔记整理助手。需要阅读用户提供的图片内容，提取关键信息并产出结构化 JSON。请保持内容准确、逻辑清晰，并且始终使用简体中文。",
-        "user_template": "请解析上面的所有图片，提取原始文本并在 JSON 的 raw_text 字段输出完整内容。title 需简洁概括主题；summary 总结重点；sections 按时间或逻辑拆分，每个元素包含 heading 与 content。key_points 提炼 3-7 个要点；study_advice 给出可执行的复习建议。当前主题分类为：{note_type}；标签：{tags_text}。如果存在模糊或无法识别的区域，请在 meta.warnings 中说明。",
+        "system_template": "你是一个智能视觉记录助手。请根据图片内容智能判断场景：如果是学科内容，请作为严谨的辅导老师；如果是生活记录、街景商铺等，请作为敏锐的生活观察家。请始终使用简体中文，语气自然流畅。",
+        "user_template": "请解析上面的所有图片，提取原始文本并在 JSON 的 raw_text 字段输出完整内容。title 需简洁概括主题；summary 总结重点；【核心指令】对于 sections，请根据图片实际内容动态生成最合适的章节标题（heading，如对于场景可用‘品牌信息’、‘画面特征’；对于学科可用‘原理解析’等）。如果是学习资料，key_points 提炼 3-7 个重点，study_advice 给出复习建议；如果是生活、商业或街景照片，key_points 提取 1-3 个画面要素即可，且 study_advice 必须返回空字符串 \"\"。当前主题分类为：{note_type}；标签：{tags_text}。如果存在模糊或是无法识别的区域，请在 meta.warnings 中说明。",
         "schema": _base_schema(),
     },
     "classical_chinese": {

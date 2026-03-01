@@ -16,7 +16,7 @@ class Note(Base):
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String(36), ForeignKey("users.id"), nullable=True, index=True)
-    device_id = Column(String(64), nullable=False, index=True)
+    device_id = Column(String(64), nullable=False, index=True, default="unknown-device")
     title = Column(String(255), nullable=False)
     category = Column(String(100), nullable=True, default="学习笔记")
     tags = Column(JSON, nullable=False, default=list)

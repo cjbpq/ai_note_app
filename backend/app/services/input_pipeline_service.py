@@ -5,7 +5,7 @@ import mimetypes
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Iterable, List, Optional
 
 from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
@@ -21,57 +21,85 @@ TERMINAL_JOB_STATUSES = {"FAILED", "PERSISTED"}
 
 
 class InputPipelineService:
-    """负责管理上传阶段的任务创建、文件存储与元数据维护。"""
-
     def __init__(self, db: Session, storage_backend: Optional[StorageBackend] = None) -> None:
         self.db = db
         self.storage = storage_backend or LocalStorageBackend()
 
+    def _normalize_files(self, files: UploadFile | Iterable[UploadFile]) -> List[UploadFile]:
+        # `UploadFile` can come from either FastAPI or Starlette in tests.
+        if hasattr(files, "filename") and hasattr(files, "file"):
+            return [files]
+        return list(files or [])
+
     def create_job(
         self,
-        files: List[UploadFile],
+        files: UploadFile | List[UploadFile],
         *,
         user_id: Optional[str],
         device_id: Optional[str],
         source: Optional[str] = None,
-    ) -> tuple[UploadJob, List[StorageResult]]:
-        if not files:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="没有上传文件")
-
-        if len(files) > MAX_IMAGE_COUNT:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="传入图片请小于或等于10张")
+    ) -> tuple[UploadJob, StorageResult | List[StorageResult]]:
+        file_list = self._normalize_files(files)
+        if not file_list:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No uploaded files")
+        if len(file_list) > MAX_IMAGE_COUNT:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Too many files, max allowed is {MAX_IMAGE_COUNT}",
+            )
 
         job_id = str(uuid.uuid4())
         file_metas = []
-        all_file_bytes = []
+        binary_payloads = []
 
-        for file in files:
+        for file in file_list:
             if not file.filename:
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="上传文件缺少文件名")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing filename")
 
             extension = os.path.splitext(file.filename)[1].lower()
             if extension not in ALLOWED_EXTENSIONS:
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"不支持的文件类型: {extension}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Unsupported file type: {extension}",
+                )
 
             file_bytes = file.file.read()
             if not file_bytes:
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"上传文件为空: {file.filename}")
-
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Empty file: {file.filename}",
+                )
             file_size = len(file_bytes)
             if file_size > MAX_FILE_SIZE:
-                raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"文件大小超出限制 (10MB): {file.filename}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"File too large (10MB max): {file.filename}",
+                )
 
             checksum = hashlib.sha256(file_bytes).hexdigest()
             content_type = file.content_type or mimetypes.guess_type(file.filename)[0] or "application/octet-stream"
+            file_metas.append(
+                {
+                    "original_name": file.filename,
+                    "extension": extension,
+                    "size": file_size,
+                    "content_type": content_type,
+                    "checksum": checksum,
+                }
+            )
+            binary_payloads.append((file_bytes, extension, content_type))
 
-            file_metas.append({
-                "original_name": file.filename,
-                "extension": extension,
-                "size": file_size,
-                "content_type": content_type,
-                "checksum": checksum,
-            })
-            all_file_bytes.append((file_bytes, extension, content_type))
+        first_meta = file_metas[0]
+        file_meta_payload = {
+            "files": file_metas,
+            "total_size": sum(item["size"] for item in file_metas),
+            # Backward-compatible single-file metadata keys.
+            "original_name": first_meta["original_name"],
+            "extension": first_meta["extension"],
+            "size": first_meta["size"],
+            "content_type": first_meta["content_type"],
+            "checksum": first_meta["checksum"],
+        }
 
         job = UploadJob(
             id=job_id,
@@ -79,48 +107,50 @@ class InputPipelineService:
             device_id=device_id,
             source=source or "unknown",
             status="RECEIVED",
-            file_meta={"files": file_metas, "total_size": sum(m["size"] for m in file_metas)},
+            file_meta=file_meta_payload,
             storage={},
         )
-
         self.db.add(job)
 
-        storage_results = []
+        storage_results: List[StorageResult] = []
         try:
-            for idx, (file_bytes, extension, content_type) in enumerate(all_file_bytes):
-                storage_result = self.storage.store_bytes(
+            single_file_mode = len(binary_payloads) == 1
+            for idx, (file_bytes, extension, content_type) in enumerate(binary_payloads):
+                target_name = f"{job_id}{extension}" if single_file_mode else f"{job_id}_{idx}{extension}"
+                stored = self.storage.store_bytes(
                     file_bytes,
-                    filename=f"{job_id}_{idx}{extension}",
+                    filename=target_name,
                     content_type=content_type,
                 )
-                storage_results.append(storage_result)
-        except Exception:
+                storage_results.append(stored)
+        except Exception:  # noqa: BLE001
             self.db.rollback()
             raise
 
         job.storage = [
             {
-                "location": sr.location,
-                "path": sr.path,
-                "bucket": sr.bucket,
-                "url": sr.url,
-                "content_type": sr.content_type,
-                "size": sr.size,
+                "location": s.location,
+                "path": s.path,
+                "bucket": s.bucket,
+                "url": s.url,
+                "content_type": s.content_type,
+                "size": s.size,
             }
-            for sr in storage_results
+            for s in storage_results
         ]
         job.status = "STORED"
         job.updated_at = datetime.now(timezone.utc)
 
         self.db.commit()
         self.db.refresh(job)
-
+        if len(storage_results) == 1:
+            return job, storage_results[0]
         return job, storage_results
 
     def get_job(self, job_id: str) -> UploadJob:
         job = self.db.query(UploadJob).filter(UploadJob.id == job_id).first()
         if not job:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="上传任务不存在")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Upload job not found")
         return job
 
     def list_jobs(self, user_id: Optional[str] = None, status_filter: Optional[str] = None) -> list[UploadJob]:

@@ -2,6 +2,7 @@
 import mimetypes
 import os
 import uuid
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Form, Query, status
@@ -15,6 +16,12 @@ from app.schemas.note import (
     NoteUpdate,
     ExportFormat,
     NoteGenerationJobResponse,
+    NoteSyncResponse,
+    NoteBatchRequest,
+    NoteBatchResponse,
+    NoteMutationBatchRequest,
+    NoteMutationBatchResponse,
+    NoteMutationResult,
 )
 from app.schemas.text import TextExtractionResponse
 from app.services.export_service import ExportService
@@ -74,7 +81,8 @@ NOTE_JOB_SOURCE = "library_from_image"
 )
 async def create_note_from_image(
     background_tasks: BackgroundTasks,
-    files: List[UploadFile] = File(..., description="待识别的图片（最多10张）"),
+    files: Optional[List[UploadFile]] = File(None, description="待识别的图片（最多10张）"),
+    file: Optional[UploadFile] = File(None, description="兼容旧参数：单张图片 file"),
     note_type: str = Form("学习笔记", description="笔记分类"),
     tags: Optional[str] = Form(None, description="以逗号分隔的标签"),
     current_user: User = Depends(get_current_user),
@@ -82,7 +90,14 @@ async def create_note_from_image(
 ):
     """上传图片并异步触发笔记生成任务（支持多图，最多10张）"""
 
-    if len(files) > MAX_IMAGE_COUNT:
+    incoming_files: List[UploadFile] = list(files or [])
+    if file is not None:
+        incoming_files.append(file)
+
+    if not incoming_files:
+        raise HTTPException(status_code=400, detail="至少上传一张图片")
+
+    if len(incoming_files) > MAX_IMAGE_COUNT:
         raise HTTPException(status_code=400, detail="传入图片请小于或等于10张")
 
     pipeline = InputPipelineService(db)
@@ -94,11 +109,12 @@ async def create_note_from_image(
         )
 
     job, storage_results = pipeline.create_job(
-        files,
+        incoming_files,
         user_id=current_user.id,
         device_id=current_user.id,
         source=NOTE_JOB_SOURCE,
     )
+    normalized_storage_results = storage_results if isinstance(storage_results, list) else [storage_results]
 
     tags_list = [tag.strip() for tag in tags.split(",") if tag.strip()] if tags else []
 
@@ -106,20 +122,21 @@ async def create_note_from_image(
     db.commit()
     db.refresh(job)
 
-    background_tasks.add_task(
-        process_note_job,
-        job.id,
-        user_id=current_user.id,
-        device_id=current_user.id,
-        note_type=note_type,
-        tags=tags_list,
+    asyncio.create_task(
+        process_note_job(
+            job.id,
+            user_id=current_user.id,
+            device_id=current_user.id,
+            note_type=note_type,
+            tags=tags_list,
+        )
     )
 
     return NoteGenerationJobResponse(
         job_id=job.id,
         status="ENQUEUED",
         detail="笔记生成任务已进入后台队列",
-        file_urls=[sr.url for sr in storage_results],
+        file_urls=[sr.url for sr in normalized_storage_results],
         queued_at=job.updated_at,
         progress_url=f"/api/v1/upload/jobs/{job.id}/stream",
     )
@@ -137,12 +154,20 @@ async def create_note_from_image(
     dependencies=[Depends(check_doubao_available)],
 )
 async def extract_text_from_image(
-    files: List[UploadFile] = File(..., description="待识别的图片（最多10张）"),
+    files: Optional[List[UploadFile]] = File(None, description="待识别的图片（最多10张）"),
+    file: Optional[UploadFile] = File(None, description="兼容旧参数：单张图片 file"),
     output_format: str = Form("markdown", description="输出格式：markdown 或 plain_text"),
     detail: Optional[str] = Form(None, description="图像解析细节层级，可选 high/low/auto"),
     current_user: User = Depends(get_current_user),
 ):
-    if len(files) > MAX_IMAGE_COUNT:
+    incoming_files: List[UploadFile] = list(files or [])
+    if file is not None:
+        incoming_files.append(file)
+
+    if not incoming_files:
+        raise HTTPException(status_code=400, detail="至少上传一张图片")
+
+    if len(incoming_files) > MAX_IMAGE_COUNT:
         raise HTTPException(status_code=400, detail="传入图片请小于或等于10张")
 
     normalized_format = output_format.strip().lower()
@@ -160,17 +185,17 @@ async def extract_text_from_image(
     stored_paths = []
     stored_urls = []
 
-    for file in files:
-        filename = file.filename or "uploaded.png"
+    for upload in incoming_files:
+        filename = upload.filename or "uploaded.png"
         extension = os.path.splitext(filename)[1].lower()
         if extension not in ALLOWED_EXTENSIONS:
-            guessed_ext = mimetypes.guess_extension(file.content_type or "")
+            guessed_ext = mimetypes.guess_extension(upload.content_type or "")
             if guessed_ext and guessed_ext.lower() in ALLOWED_EXTENSIONS:
                 extension = guessed_ext.lower()
             else:
                 raise HTTPException(status_code=400, detail=f"不支持的文件类型: {extension or '未知'}")
 
-        file_bytes = await file.read()
+        file_bytes = await upload.read()
         if not file_bytes:
             raise HTTPException(status_code=400, detail=f"上传文件为空: {filename}")
 
@@ -180,7 +205,7 @@ async def extract_text_from_image(
         stored = storage.store_bytes(
             file_bytes,
             filename=f"{uuid.uuid4()}{extension}",
-            content_type=file.content_type,
+            content_type=upload.content_type,
         )
         stored_paths.append(stored.path)
         stored_urls.append(stored.url)
@@ -205,6 +230,7 @@ async def extract_text_from_image(
         cleaned_text=cleaned or None,
         format=result.get("format", normalized_format),
         file_urls=stored_urls,
+        file_url=stored_urls[0] if stored_urls else None,
         response=result.get("response"),
     )
 
@@ -221,6 +247,10 @@ async def list_notes(
     limit: int = 100,
     category: Optional[str] = None,
     favorite_only: bool = False,
+    is_favorite: Optional[bool] = Query(
+        None,
+        description="是否只返回收藏笔记（兼容参数：is_favorite=true）",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -232,10 +262,257 @@ async def list_notes(
     else:
         notes = note_service.get_user_notes(current_user.id, skip, limit)
 
-    if favorite_only:
+    favorite_filter = is_favorite if is_favorite is not None else favorite_only
+    if favorite_filter:
         notes = [note for note in notes if note.is_favorite]
 
     return NoteListResponse(notes=notes, total=len(notes))
+
+
+@router.get(
+    "/notes/sync",
+    response_model=NoteSyncResponse,
+    summary="增量同步笔记",
+    description=(
+        "客户端传入上次同步的时间戳 `since`，服务端返回此后新增/更新的笔记摘要"
+        "（轻量级，不含 original_text 和 structured_data）以及已删除的笔记 ID。"
+        "首次同步传入 `since=2000-01-01T00:00:00Z` 或不传即可获取全部。"
+        "响应中的 `server_time` 应作为下次同步的 `since` 参数。"
+    ),
+    response_description="增量同步结果",
+)
+async def sync_notes(
+    since: Optional[datetime] = Query(
+        None,
+        description="上次同步的 ISO 8601 时间戳，如 2024-01-01T00:00:00Z。不传则返回全量摘要。",
+    ),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """增量同步笔记 — 刷新页面时调用
+
+    客户端只需记住上一次返回的 server_time，下次刷新时传入即可拿到增量数据。
+    """
+    note_service = NoteService(db)
+    sync_watermark = datetime.now(timezone.utc)
+
+    # 未传 since 视为首次全量同步
+    if since is None:
+        since = datetime(2000, 1, 1, tzinfo=timezone.utc)
+    elif since.tzinfo is None:
+        # naive datetime 视为 UTC
+        since = since.replace(tzinfo=timezone.utc)
+
+    updated = note_service.get_notes_updated_since(
+        current_user.id,
+        since,
+        until=sync_watermark,
+    )
+    deleted_ids = note_service.get_deleted_note_ids_since(
+        current_user.id,
+        since,
+        until=sync_watermark,
+    )
+
+    return NoteSyncResponse(
+        updated=updated,
+        deleted_ids=deleted_ids,
+        server_time=sync_watermark,
+    )
+
+
+@router.post(
+    "/notes/batch",
+    response_model=NoteBatchResponse,
+    summary="批量获取笔记详情",
+    description=(
+        "客户端传入未缓存的笔记 ID 列表（上限 50 条），一次性返回完整笔记内容"
+        "（含 original_text 和 structured_data），用于后台静默缓存。"
+    ),
+    response_description="批量笔记详情",
+)
+async def batch_get_notes(
+    body: NoteBatchRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """批量获取笔记详情 — 后台静默缓存时调用
+
+    客户端可将增量同步获得的新笔记 ID 做分批（每批 ≤ 50），
+    逐批调用此接口下载完整内容到本地数据库。
+    每条笔记独立可查，中途断网或清后台不影响已缓存的数据。
+    """
+    note_service = NoteService(db)
+    notes = note_service.get_notes_by_ids(current_user.id, body.note_ids)
+    return NoteBatchResponse(notes=notes, total=len(notes))
+
+
+@router.post(
+    "/notes/mutations",
+    response_model=NoteMutationBatchResponse,
+    summary="批量回放离线变更",
+    description=(
+        "客户端在离线期间记录的变更任务（编辑、收藏、删除）可在恢复网络后批量上传。"
+        "服务端按顺序逐条执行，并返回每条任务的处理结果，方便客户端精确重试失败项。"
+    ),
+    response_description="离线变更处理结果",
+)
+async def apply_note_mutations(
+    body: NoteMutationBatchRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """批量处理客户端离线变更任务。"""
+    note_service = NoteService(db)
+    results: List[NoteMutationResult] = []
+
+    for mutation in body.mutations:
+        note_id = mutation.note_id
+        mutation_type = mutation.type
+
+        try:
+            if mutation_type == "update_note":
+                if mutation.patch is None:
+                    results.append(
+                        NoteMutationResult(
+                            op_id=mutation.op_id,
+                            type=mutation_type,
+                            note_id=note_id,
+                            status="invalid",
+                            code=422,
+                            message="update_note requires patch",
+                        )
+                    )
+                    continue
+
+                update_data = {
+                    key: value
+                    for key, value in mutation.patch.model_dump().items()
+                    if value is not None
+                }
+                if not update_data:
+                    results.append(
+                        NoteMutationResult(
+                            op_id=mutation.op_id,
+                            type=mutation_type,
+                            note_id=note_id,
+                            status="invalid",
+                            code=422,
+                            message="update_note patch cannot be empty",
+                        )
+                    )
+                    continue
+
+                note = note_service.update_note(note_id, current_user.id, update_data)
+                if note is None:
+                    results.append(
+                        NoteMutationResult(
+                            op_id=mutation.op_id,
+                            type=mutation_type,
+                            note_id=note_id,
+                            status="not_found",
+                            code=404,
+                            message="note not found",
+                        )
+                    )
+                    continue
+
+                results.append(
+                    NoteMutationResult(
+                        op_id=mutation.op_id,
+                        type=mutation_type,
+                        note_id=note_id,
+                        status="applied",
+                        code=200,
+                        updated_at=note.updated_at,
+                    )
+                )
+                continue
+
+            if mutation_type == "set_favorite":
+                if mutation.is_favorite is None:
+                    results.append(
+                        NoteMutationResult(
+                            op_id=mutation.op_id,
+                            type=mutation_type,
+                            note_id=note_id,
+                            status="invalid",
+                            code=422,
+                            message="set_favorite requires is_favorite",
+                        )
+                    )
+                    continue
+
+                note = note_service.set_favorite(note_id, current_user.id, mutation.is_favorite)
+                if note is None:
+                    results.append(
+                        NoteMutationResult(
+                            op_id=mutation.op_id,
+                            type=mutation_type,
+                            note_id=note_id,
+                            status="not_found",
+                            code=404,
+                            message="note not found",
+                        )
+                    )
+                    continue
+
+                results.append(
+                    NoteMutationResult(
+                        op_id=mutation.op_id,
+                        type=mutation_type,
+                        note_id=note_id,
+                        status="applied",
+                        code=200,
+                        updated_at=note.updated_at,
+                    )
+                )
+                continue
+
+            if mutation_type == "delete_note":
+                deleted = note_service.delete_note(note_id, current_user.id)
+                if not deleted:
+                    results.append(
+                        NoteMutationResult(
+                            op_id=mutation.op_id,
+                            type=mutation_type,
+                            note_id=note_id,
+                            status="not_found",
+                            code=404,
+                            message="note not found",
+                        )
+                    )
+                    continue
+
+                results.append(
+                    NoteMutationResult(
+                        op_id=mutation.op_id,
+                        type=mutation_type,
+                        note_id=note_id,
+                        status="applied",
+                        code=200,
+                    )
+                )
+                continue
+        except Exception as exc:  # noqa: BLE001
+            results.append(
+                NoteMutationResult(
+                    op_id=mutation.op_id,
+                    type=mutation_type,
+                    note_id=note_id,
+                    status="failed",
+                    code=500,
+                    message=str(exc),
+                )
+            )
+
+    applied_count = sum(1 for item in results if item.status == "applied")
+    return NoteMutationBatchResponse(
+        results=results,
+        applied_count=applied_count,
+        failed_count=len(results) - applied_count,
+        server_time=datetime.now(timezone.utc),
+    )
 
 
 @router.get(

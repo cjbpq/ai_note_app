@@ -63,7 +63,7 @@ def test_create_access_token_timezone_aware():
     assert payload["exp"] > current_timestamp
 
     # 验证: exp 时间合理 (15 分钟后, 允许 1 秒误差)
-    expected_exp = datetime.now(timezone.utc) + timedelta(minutes=15)
+    expected_exp = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     actual_exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
 
     time_diff = abs((expected_exp - actual_exp).total_seconds())

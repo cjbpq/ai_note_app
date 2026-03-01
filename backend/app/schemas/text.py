@@ -10,6 +10,7 @@ class TextExtractionResponse(BaseModel):
     cleaned_text: Optional[str] = None
     format: str = "markdown"
     file_urls: List[str]
+    file_url: Optional[str] = None
     provider: str = "doubao"
     response: Optional[dict[str, Any]] = None
 

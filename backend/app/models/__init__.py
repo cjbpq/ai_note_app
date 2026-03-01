@@ -1,11 +1,7 @@
-from app.models import note  # noqa: F401
-from app.models import upload  # noqa: F401
-from app.models import upload_job  # noqa: F401
-from app.models import user  # noqa: F401
+from . import deletion_log  # noqa: F401
+from . import email_verification_code  # noqa: F401
+from . import note  # noqa: F401
+from . import upload_job  # noqa: F401
+from . import user  # noqa: F401
 
-__all__ = [
-    "note",
-    "upload",
-    "upload_job",
-    "user",
-]
+__all__ = ["note", "upload_job", "user", "deletion_log", "email_verification_code"]
