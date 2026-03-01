@@ -407,8 +407,17 @@ class DoubaoVisionService:
     def _resolve_structured_output_mode(self, model_id: str) -> Optional[str]:
         metadata = self._get_model_metadata(model_id)
         if not metadata:
-            # Backward compatibility when /models metadata is temporarily unavailable.
-            return "json_schema"
+            if settings.DOUBAO_ALLOW_LEGACY_FALLBACK:
+                logger.warning(
+                    "Model metadata unavailable for %s, using legacy json_schema fallback",
+                    model_id,
+                )
+                return "json_schema"
+            logger.warning(
+                "Model metadata unavailable for %s, disable response_format to avoid unsupported parameter errors",
+                model_id,
+            )
+            return None
 
         structured_outputs = (
             metadata.get("features", {})
