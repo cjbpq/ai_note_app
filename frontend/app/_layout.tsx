@@ -198,6 +198,30 @@ export default function RootLayout() {
               animation: "slide_from_right",
             }}
           />
+          {/* 用户设置详情页 - 页面内已自带 Appbar，隐藏 Stack Header 避免双顶栏 */}
+          <Stack.Screen
+            name="user-settings"
+            options={{
+              headerShown: false,
+              animation: "slide_from_right",
+            }}
+          />
+          {/* 帮助与反馈页 */}
+          <Stack.Screen
+            name="help"
+            options={{
+              headerShown: false,
+              animation: "slide_from_right",
+            }}
+          />
+          {/* 关于页 */}
+          <Stack.Screen
+            name="about"
+            options={{
+              headerShown: false,
+              animation: "slide_from_right",
+            }}
+          />
         </Stack>
         {/* 离线状态横幅 - 全局覆盖，网络断开时顶部显示提示 */}
         <OfflineBanner />

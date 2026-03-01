@@ -3,6 +3,7 @@ export default {
     home: "首页",
     read: "阅读",
     settings: "设置",
+    profile: "我的",
   },
   home: {
     pick_image: "拍照/选择图片",
@@ -183,6 +184,75 @@ export default {
     title: "我的收藏",
     empty: "暂无收藏笔记",
   },
+  help: {
+    title: "帮助与反馈",
+    faq_section: "常见问题",
+    contact_section: "联系我们",
+    faq: {
+      how_create: {
+        question: "如何创建新笔记？",
+        answer:
+          "在首页点击“拍照/选择图片”，上传图片后等待识别完成并确认保存，即可创建新笔记。",
+      },
+      how_favorite: {
+        question: "如何收藏笔记？",
+        answer:
+          "在笔记详情页点击右上角收藏按钮，或在笔记卡片上执行收藏操作，已收藏内容可在“我的收藏”查看。",
+      },
+      how_theme: {
+        question: "如何更改主题模式？",
+        answer:
+          "进入“我的”页，点击“设置”后可在“主题模式”中切换为跟随系统、浅色或深色模式。",
+      },
+      forget_password: {
+        question: "忘记密码怎么办？",
+        answer:
+          "当前 MVP 版本暂未开放重置密码功能，请先联系开发团队邮箱协助处理。",
+      },
+      how_sync: {
+        question: "如何同步笔记？",
+        answer:
+          "应用联网后会自动同步离线期间的操作；如遇网络异常，请稍后重试并保持网络连接。",
+      },
+    },
+    contact: {
+      email_title: "开发者邮箱",
+      email_value: "yyzj@yyzj.work",
+      feedback_title: "反馈建议",
+      feedback_desc: "欢迎通过邮件向我们反馈使用体验",
+    },
+  },
+  about: {
+    title: "关于",
+    product: {
+      name_cn: "邮雁智记",
+      name_en: "SnapNote",
+      badge_version: "v0.1.1MVP",
+    },
+    app_intro_section: "应用介绍",
+    app_intro_text:
+      "智慧笔记是一款专为校园用户打造的智能笔记应用。支持快速记录、分类管理和云端同步，让您的学习笔记触手可及。",
+    team_section: "开发团队",
+    team: {
+      name_label: "团队名称",
+      name_value: "邮雁智记",
+      school_label: "所属院校",
+      school_value: "北京邮电大学",
+      email_label: "联系邮箱",
+      email_value: "yyzj@yyzj.work",
+    },
+    version_section: "版本信息",
+    version: {
+      current_label: "当前版本",
+      current_value: "0.1.1",
+      build_label: "构建版本",
+      build_value: "2026.3.1",
+      runtime_label: "运行环境",
+      runtime_value: "Expo / React Native",
+    },
+    copyright_line1: "Copyright 2026 邮雁智记团队",
+    copyright_line2: "All Rights Reserved",
+  },
   screen: {
     read_title: "阅读页面",
     settings_title: "设置页面",
@@ -362,6 +432,19 @@ export default {
       settings: "设置",
       help_feedback: "帮助与反馈",
       about: "关于",
+    },
+    detail: {
+      title: "设置",
+      account_section: "账户设置",
+      profile: "个人资料",
+      email: "邮箱",
+      change_password: "修改密码",
+      appearance_section: "外观设置",
+      font_size: "字体大小",
+      font_size_value: "标准",
+      notification_section: "通知设置",
+      push_notification: "推送通知",
+      coming_soon: "即将推出",
     },
     logout_button: "退出登录",
     logout_confirm_title: "确认退出",

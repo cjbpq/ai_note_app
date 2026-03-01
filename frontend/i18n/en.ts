@@ -3,6 +3,7 @@ export default {
     home: "Home",
     read: "Read",
     settings: "Settings",
+    profile: "Me",
   },
   home: {
     pick_image: "Take Photo / Pick Image",
@@ -183,6 +184,75 @@ export default {
   favorites: {
     title: "My Favorites",
     empty: "No favorite notes yet",
+  },
+  help: {
+    title: "Help & Feedback",
+    faq_section: "FAQ",
+    contact_section: "Contact Us",
+    faq: {
+      how_create: {
+        question: "How do I create a new note?",
+        answer:
+          "On the Home page, tap 'Take Photo / Pick Image'. After recognition finishes, confirm save to create the note.",
+      },
+      how_favorite: {
+        question: "How do I favorite a note?",
+        answer:
+          "Open note details and tap the favorite button, or favorite from note cards. Favorited notes appear in 'My Favorites'.",
+      },
+      how_theme: {
+        question: "How do I change theme mode?",
+        answer:
+          "Go to Profile -> Settings, then switch Theme mode between System, Light, and Dark.",
+      },
+      forget_password: {
+        question: "What if I forget my password?",
+        answer:
+          "Password reset is not available in the current MVP. Please contact the team email for support.",
+      },
+      how_sync: {
+        question: "How are notes synced?",
+        answer:
+          "When network is available, offline actions are synced automatically. If syncing fails, please retry later.",
+      },
+    },
+    contact: {
+      email_title: "Developer Email",
+      email_value: "yyzj@yyzj.work",
+      feedback_title: "Feedback",
+      feedback_desc: "Feel free to send us your feedback by email",
+    },
+  },
+  about: {
+    title: "About",
+    product: {
+      name_cn: "邮雁智记",
+      name_en: "SnapNote",
+      badge_version: "v0.1.1MVP",
+    },
+    app_intro_section: "App Introduction",
+    app_intro_text:
+      "SmartNotes is an intelligent note-taking app for campus users. It supports quick capture, category management, and cloud sync to keep your study notes always within reach.",
+    team_section: "Development Team",
+    team: {
+      name_label: "Team Name",
+      name_value: "邮雁智记",
+      school_label: "School",
+      school_value: "Beijing University of Posts and Telecommunications",
+      email_label: "Contact Email",
+      email_value: "yyzj@yyzj.work",
+    },
+    version_section: "Version Info",
+    version: {
+      current_label: "Current Version",
+      current_value: "0.1.1",
+      build_label: "Build Version",
+      build_value: "2026.3.1",
+      runtime_label: "Runtime",
+      runtime_value: "Expo / React Native",
+    },
+    copyright_line1: "Copyright 2026 YYZJ Team",
+    copyright_line2: "All Rights Reserved",
   },
   screen: {
     read_title: "Read Page",
@@ -366,6 +436,19 @@ export default {
       settings: "Settings",
       help_feedback: "Help & Feedback",
       about: "About",
+    },
+    detail: {
+      title: "Settings",
+      account_section: "Account Settings",
+      profile: "Profile",
+      email: "Email",
+      change_password: "Change Password",
+      appearance_section: "Appearance",
+      font_size: "Font Size",
+      font_size_value: "Standard",
+      notification_section: "Notifications",
+      push_notification: "Push Notifications",
+      coming_soon: "Coming Soon",
     },
     logout_button: "Log Out",
     logout_confirm_title: "Confirm Logout",
