@@ -1,8 +1,11 @@
-﻿import os
+import os
+from pathlib import Path
 from typing import Optional
 
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -20,29 +23,29 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
 
     # Security
-    # 改前问题: SECRET_KEY 硬编码默认值 "your-secret-key-change-in-production", 容易被攻击者伪造 JWT token
-    # 为什么改: 从环境变量强制加载, 防止密钥泄露到版本控制系统
-    # 学习要点: 敏感配置应使用环境变量, 永不提交到版本控制. 使用 Field(...) 标记为必填字段
+    # ????: SECRET_KEY ?????? "your-secret-key-change-in-production", ???????? JWT token
+    # ????: ?????????, ?????????????
+    # ????: ???????????, ?????????. ?? Field(...) ???????
     SECRET_KEY: str = Field(
-        ...,  # 必填字段, 启动时未配置会报错
-        min_length=32,  # 最小长度 32 字节, 确保密钥强度
-        description="JWT 签名密钥 (必须从环境变量加载, 使用 python -c \"import secrets; print(secrets.token_urlsafe(32))\" 生成)",
+        ...,  # ????, ?????????
+        min_length=32,  # ???? 32 ??, ??????
+        description="JWT ???? (?????????, ?? python -c \"import secrets; print(secrets.token_urlsafe(32))\" ??)",
     )
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
 
-    # 改前问题: CORS 未配置白名单, 允许任何域名访问 (allow_origins=["*"])
-    # 为什么改: 限制为前端域名白名单, 防止 CSRF 攻击
-    # 学习要点: allow_origins=["*"] + allow_credentials=True 会导致恶意网站能利用用户浏览器 cookies 调用本项目 API
+    # ????: CORS ??????, ???????? (allow_origins=["*"])
+    # ????: ??????????, ?? CSRF ??
+    # ????: allow_origins=["*"] + allow_credentials=True ??????????????? cookies ????? API
     ALLOWED_ORIGINS: str = Field(
         default="http://localhost:3000,http://localhost:5173",
-        description="允许的 CORS 源 (逗号分隔). 生产环境应设置为实际前端域名 (如 https://app.example.com)",
+        description="??? CORS ? (????). ?????????????? (? https://app.example.com)",
     )
 
-    # Timezone (用于 API 返回时间的时区转换，默认中国标准时间)
+    # Timezone (?? API ??????????????????)
     TIMEZONE: str = "Asia/Shanghai"
 
-    # 邮件服务配置 (SMTP)
+    # ?????? (SMTP)
     SMTP_HOST: str = "smtp.exmail.qq.com"
     SMTP_PORT: int = 465
     SMTP_USE_SSL: bool = True
@@ -52,7 +55,7 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/ai_note_app"
-    UPLOAD_DIR: str = "uploaded_images"
+    UPLOAD_DIR: str = "/var/www/ai_note_app/shared/uploaded_images"
 
     # Doubao configuration
     USE_DOUBAO_PIPELINE: bool = True
@@ -108,6 +111,15 @@ class Settings(BaseSettings):
             if normalized in falsy:
                 return False
         return value
+
+    @field_validator("UPLOAD_DIR")
+    @classmethod
+    def _validate_upload_dir(cls, value: str) -> str:
+        upload_dir = Path(value).expanduser()
+        normalized = upload_dir.resolve() if upload_dir.is_absolute() else (PROJECT_ROOT / upload_dir).resolve()
+        if normalized == PROJECT_ROOT or PROJECT_ROOT in normalized.parents:
+            raise ValueError("UPLOAD_DIR must be outside the backend project directory")
+        return str(normalized)
 
     @model_validator(mode="after")
     def _apply_doubao_alias_fallbacks(cls, values: "Settings") -> "Settings":
