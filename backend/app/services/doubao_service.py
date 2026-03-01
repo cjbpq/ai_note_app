@@ -33,6 +33,8 @@ class DoubaoVisionService:
 
     def __init__(self) -> None:
         self._client: Optional[Any] = None
+        self._model_catalog_cache: Dict[str, Dict[str, Any]] = {}
+        self._model_catalog_loaded = False
 
     @property
     def is_available(self) -> bool:
@@ -111,16 +113,14 @@ class DoubaoVisionService:
             "messages": input_payload,
         }
 
-        # 添加 JSON schema（如果启用）
+        # 根据模型能力自动选择官方支持的结构化输出格式。
         if schema_payload:
-            request_kwargs["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "structured_note",
-                    "schema": schema_payload,
-                    "strict": True
-                }
-            }
+            response_format = self._build_response_format(
+                model_id=settings.DOUBAO_MODEL_ID,
+                schema_payload=schema_payload,
+            )
+            if response_format:
+                request_kwargs["response_format"] = response_format
 
         # 控制思考模式（根据官方文档直接传递 thinking 参数）
         thinking_type = thinking or settings.DOUBAO_THINKING_MODE or "disabled"
@@ -130,11 +130,27 @@ class DoubaoVisionService:
         if tokens_limit:
             request_kwargs["max_tokens"] = tokens_limit
 
+        sanitized_kwargs = {k: v for k, v in request_kwargs.items() if v is not None}
+        used_response_format = "response_format" in sanitized_kwargs
+
         try:
-            response = client.chat.completions.create(**{k: v for k, v in request_kwargs.items() if v is not None})
+            response = client.chat.completions.create(**sanitized_kwargs)
         except Exception as exc:  # noqa: BLE001
-            logger.exception("Doubao request failed")
-            raise DoubaoServiceError(str(exc)) from exc
+            if used_response_format and self._is_json_schema_unsupported(exc):
+                logger.warning(
+                    "Model %s does not support response_format=json_schema, retrying without schema",
+                    settings.DOUBAO_MODEL_ID,
+                )
+                fallback_kwargs = dict(sanitized_kwargs)
+                fallback_kwargs.pop("response_format", None)
+                try:
+                    response = client.chat.completions.create(**fallback_kwargs)
+                except Exception as retry_exc:  # noqa: BLE001
+                    logger.exception("Doubao request failed after retry without json_schema")
+                    raise DoubaoServiceError(str(retry_exc)) from retry_exc
+            else:
+                logger.exception("Doubao request failed")
+                raise DoubaoServiceError(str(exc)) from exc
 
         response_payload = self._response_to_dict(response)
         note_payload, raw_text = self._extract_note_payload(response_payload)
@@ -362,6 +378,77 @@ class DoubaoVisionService:
         if not message_texts:
             raise DoubaoServiceError("Doubao response did not contain assistant message text")
         return "\n".join(message_texts).strip()
+
+    def _build_response_format(
+        self,
+        *,
+        model_id: str,
+        schema_payload: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        mode = self._resolve_structured_output_mode(model_id)
+        if mode == "json_schema":
+            return {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "structured_note",
+                    "schema": schema_payload,
+                    "strict": True,
+                },
+            }
+        if mode == "json_object":
+            return {"type": "json_object"}
+
+        logger.info(
+            "Model %s does not support structured_outputs, using prompt-only JSON generation",
+            model_id,
+        )
+        return None
+
+    def _resolve_structured_output_mode(self, model_id: str) -> Optional[str]:
+        metadata = self._get_model_metadata(model_id)
+        if not metadata:
+            # Backward compatibility when /models metadata is temporarily unavailable.
+            return "json_schema"
+
+        structured_outputs = (
+            metadata.get("features", {})
+            .get("structured_outputs", {})
+        )
+        if structured_outputs.get("json_schema"):
+            return "json_schema"
+        if structured_outputs.get("json_object"):
+            return "json_object"
+        return None
+
+    def _get_model_metadata(self, model_id: str) -> Optional[Dict[str, Any]]:
+        if not self._model_catalog_loaded:
+            self._load_model_catalog()
+        return self._model_catalog_cache.get(model_id)
+
+    def _load_model_catalog(self) -> None:
+        client = self._ensure_client()
+        try:
+            payload = client.get("/models", cast_to=object)
+            model_list = payload.get("data", []) if isinstance(payload, dict) else []
+            for model_item in model_list:
+                if not isinstance(model_item, dict):
+                    continue
+                model_key = model_item.get("id")
+                if isinstance(model_key, str) and model_key:
+                    self._model_catalog_cache[model_key] = model_item
+        except Exception:  # noqa: BLE001
+            logger.warning("Failed to load model metadata from /models", exc_info=True)
+        finally:
+            self._model_catalog_loaded = True
+
+    @staticmethod
+    def _is_json_schema_unsupported(exc: Exception) -> bool:
+        message = str(exc).lower()
+        return (
+            "response_format.type" in message
+            and "json_schema" in message
+            and ("not supported" in message or "invalidparameter" in message or "not valid" in message)
+        )
 
 
 doubao_service = DoubaoVisionService()
