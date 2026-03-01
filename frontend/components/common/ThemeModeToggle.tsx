@@ -56,8 +56,8 @@ export const ThemeModeToggle: React.FC = () => {
 
 const styles = StyleSheet.create({
   container: {
-    marginHorizontal: 16,
-    marginTop: 12,
+    marginHorizontal: 0,
+    marginTop: 0,
   },
   toggleRow: {
     marginTop: 10,

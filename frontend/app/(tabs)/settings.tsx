@@ -13,7 +13,6 @@ import {
   Text,
   useTheme,
 } from "react-native-paper";
-import { ThemeModeToggle } from "../../components/common";
 import { useAuth } from "../../hooks/useAuth";
 import { useNotes } from "../../hooks/useNotes";
 import { useAuthStore } from "../../store/useAuthStore";
@@ -228,8 +227,7 @@ export default function SettingsScreen() {
           )}
           right={(props) => <List.Icon {...props} icon="chevron-right" />}
           onPress={() => {
-            // TODO: 跳转到设置详情页面
-            console.log("Navigate to Settings Detail");
+            router.push("/user-settings" as Href);
           }}
         />
         <Divider />
@@ -251,8 +249,7 @@ export default function SettingsScreen() {
           )}
           right={(props) => <List.Icon {...props} icon="chevron-right" />}
           onPress={() => {
-            // TODO: 跳转到帮助页面
-            console.log("Navigate to Help");
+            router.push("/help" as Href);
           }}
         />
         <Divider />
@@ -274,17 +271,10 @@ export default function SettingsScreen() {
           )}
           right={(props) => <List.Icon {...props} icon="chevron-right" />}
           onPress={() => {
-            // TODO: 跳转到关于页面
-            console.log("Navigate to About");
+            router.push("/about" as Href);
           }}
         />
       </View>
-
-      {/*
-        主题模式切换（MVP）：放在“虚假导航栏”列表下方。
-        组件内部通过 Hook 管理状态，后续可自由移植到任意页面/区域。
-      */}
-      <ThemeModeToggle />
 
       {/* 退出登录按钮（仅登录状态显示） */}
       {isAuthenticated && (
