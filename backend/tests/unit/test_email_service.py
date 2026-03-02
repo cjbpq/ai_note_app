@@ -59,3 +59,12 @@ def test_send_verification_email_sets_required_headers(monkeypatch):
     assert msg["Message-ID"].startswith("<")
     assert msg["Message-ID"].endswith(">")
     assert "@example.com>" in msg["Message-ID"]
+
+
+@pytest.mark.unit
+def test_message_id_domain_falls_back_to_smtp_host(monkeypatch):
+    monkeypatch.setattr(settings, "SMTP_USERNAME", "smtp-user")
+    monkeypatch.setattr(settings, "SMTP_HOST", "smtp.exmail.qq.com")
+    service = EmailService()
+
+    assert service._message_id_domain() == "smtp.exmail.qq.com"

@@ -140,6 +140,16 @@ def _code_error_status(reason: str | None) -> int:
     return status.HTTP_400_BAD_REQUEST
 
 
+def _require_registered_email(service: UserService, email: str) -> User:
+    user = service.get_user_by_email(email)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="该邮箱未注册",
+        )
+    return user
+
+
 @router.post(
     "/email/send-code",
     response_model=EmailSendCodeResponse,
@@ -232,18 +242,13 @@ async def email_login(
     request: EmailLoginRequest,
     db: Session = Depends(get_db),
 ):
+    service = UserService(db)
+    user = _require_registered_email(service, str(request.email))
+
     code_service = VerificationCodeService(db)
     valid, reason = code_service.verify_code(request.email, request.code, "login")
     if not valid:
         raise HTTPException(status_code=_code_error_status(reason), detail=reason)
-
-    service = UserService(db)
-    user = service.get_user_by_email(request.email)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="该邮箱未注册",
-        )
 
     token = create_access_token({"sub": user.username})
     return {"access_token": token, "token_type": "bearer"}
@@ -259,12 +264,14 @@ async def reset_password(
     request: ResetPasswordRequest,
     db: Session = Depends(get_db),
 ):
+    service = UserService(db)
+    _require_registered_email(service, str(request.email))
+
     code_service = VerificationCodeService(db)
     valid, reason = code_service.verify_code(request.email, request.code, "reset_password")
     if not valid:
         raise HTTPException(status_code=_code_error_status(reason), detail=reason)
 
-    service = UserService(db)
     try:
         service.reset_password_by_email(request.email, request.new_password)
     except ValueError as exc:

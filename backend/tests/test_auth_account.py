@@ -189,3 +189,25 @@ def test_change_bound_email_by_verification_code(monkeypatch):
     assert me_resp.status_code == 200
     assert me_resp.json().get("email") == new_email
     assert me_resp.json().get("email") != old_email
+
+
+def test_email_login_requires_registered_email():
+    email = f"unregistered-{uuid.uuid4().hex[:10]}@example.com"
+
+    resp = client.post(
+        "/api/v1/auth/email/login",
+        json={"email": email, "code": "123456"},
+    )
+    assert resp.status_code == 400
+    assert resp.json().get("detail") == "该邮箱未注册"
+
+
+def test_reset_password_requires_registered_email():
+    email = f"unregistered-{uuid.uuid4().hex[:10]}@example.com"
+
+    resp = client.post(
+        "/api/v1/auth/password/reset",
+        json={"email": email, "code": "123456", "new_password": "NewPassword456"},
+    )
+    assert resp.status_code == 400
+    assert resp.json().get("detail") == "该邮箱未注册"
