@@ -227,6 +227,22 @@ export default function RootLayout() {
               animation: "slide_from_right",
             }}
           />
+          {/* 修改密码页 — 同时承载"修改密码"和"重置密码"两种模式 */}
+          <Stack.Screen
+            name="change-password"
+            options={{
+              headerShown: false,
+              animation: "slide_from_right",
+            }}
+          />
+          {/* 修改绑定邮箱页 */}
+          <Stack.Screen
+            name="change-email"
+            options={{
+              headerShown: false,
+              animation: "slide_from_right",
+            }}
+          />
         </Stack>
         {/* 离线状态横幅 - 全局覆盖，网络断开时顶部显示提示 */}
         <OfflineBanner />

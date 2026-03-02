@@ -323,12 +323,122 @@ export interface User {
 }
 
 /**
- * 登录/注册表单
+ * 登录/注册表单（旧版用户名注册）
  */
 export interface AuthForm {
   username: string;
   password: string;
   email?: string;
+}
+
+// ========================================
+// 【邮箱验证码注册相关类型】
+// ========================================
+
+/**
+ * 验证码用途
+ * 后端 purpose 字段的合法取值，每种用途的验证码互相隔离
+ */
+export type EmailCodePurpose =
+  | "register"
+  | "login"
+  | "reset_password"
+  | "change_email";
+
+/**
+ * 发送验证码请求
+ * POST /auth/email/send-code
+ */
+export interface EmailSendCodeRequest {
+  email: string;
+  purpose: EmailCodePurpose;
+}
+
+/**
+ * 发送验证码响应
+ */
+export interface EmailSendCodeResponse {
+  message: string;
+  /** 验证码有效期（秒），后端返回 300 即 5 分钟 */
+  expires_in: number;
+}
+
+/**
+ * 邮箱验证码注册请求
+ * POST /auth/email/register
+ */
+export interface EmailRegisterRequest {
+  email: string;
+  /** 6 位数字验证码 */
+  code: string;
+  username: string;
+  password: string;
+}
+
+/**
+ * 邮箱验证码登录请求
+ * POST /auth/email/login
+ * 后端返回 Token { access_token, token_type }，与密码登录一致
+ */
+export interface EmailLoginRequest {
+  email: string;
+  /** 6 位数字验证码 */
+  code: string;
+}
+
+/**
+ * 后端 UserResponse（注册/获取用户信息的原始响应）
+ */
+export interface UserResponse {
+  username: string;
+  email?: string;
+  id: string;
+  created_at: string;
+}
+
+/**
+ * 修改密码请求（已登录用户，需 Bearer Token）
+ * POST /auth/password/change
+ */
+export interface ChangePasswordRequest {
+  old_password: string;
+  new_password: string;
+}
+
+/**
+ * 重置密码请求（不需要登录态，通过邮箱验证码验证身份）
+ * POST /auth/password/reset
+ */
+export interface ResetPasswordRequest {
+  email: string;
+  /** 6 位数字验证码 */
+  code: string;
+  new_password: string;
+}
+
+/**
+ * 修改绑定邮箱请求（已登录用户，需 Bearer Token）
+ * POST /auth/email/change
+ */
+export interface ChangeEmailRequest {
+  new_email: string;
+  /** 6 位数字验证码（发送到新邮箱） */
+  code: string;
+}
+
+/**
+ * 修改绑定邮箱响应
+ */
+export interface ChangeEmailResponse {
+  message: string;
+  email: string;
+}
+
+/**
+ * 通用消息响应（修改密码/重置密码等接口返回）
+ */
+export interface MessageResponse {
+  message: string;
 }
 
 // ========================================

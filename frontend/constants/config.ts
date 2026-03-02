@@ -47,6 +47,10 @@ export const APP_CONFIG = {
     USERNAME_MAX: 10,
     PASSWORD_MIN: 8,
     PASSWORD_MAX: 20,
+    /** 邮箱验证码位数 */
+    VERIFY_CODE_LENGTH: 6,
+    /** 发送验证码后的前端冷却时间（秒），用于按钮倒计时 */
+    VERIFY_CODE_COOLDOWN: 60,
   },
 
   // 图片配置
@@ -111,6 +115,12 @@ export const ENDPOINTS = {
     REGISTER: "/auth/register",
     REFRESH: "/auth/refresh", // Token 刷新接口
     ME: "/auth/me", // 获取当前用户信息
+    EMAIL_SEND_CODE: "/auth/email/send-code", // 发送邮箱验证码
+    EMAIL_REGISTER: "/auth/email/register", // 邮箱验证码注册
+    EMAIL_LOGIN: "/auth/email/login", // 邮箱验证码登录
+    PASSWORD_CHANGE: "/auth/password/change", // 已登录用户修改密码
+    PASSWORD_RESET: "/auth/password/reset", // 忘记密码/重置密码（邮箱验证码）
+    EMAIL_CHANGE: "/auth/email/change", // 修改绑定邮箱
   },
   LIBRARY: {
     UPLOAD_IMAGE: "/library/notes/from-image",

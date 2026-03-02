@@ -9,7 +9,17 @@ import { clearLocalNotes, clearSyncQueue } from "../services/database";
 import { searchHistoryService } from "../services/searchHistoryService";
 import { syncService } from "../services/syncService";
 import { useAuthStore } from "../store/useAuthStore";
-import { AuthForm, LoginResponse, ServiceError } from "../types";
+import {
+  AuthForm,
+  ChangeEmailRequest,
+  ChangePasswordRequest,
+  EmailLoginRequest,
+  EmailRegisterRequest,
+  EmailSendCodeRequest,
+  LoginResponse,
+  ResetPasswordRequest,
+  ServiceError,
+} from "../types";
 import { useToast } from "./useToast";
 
 /**
@@ -115,7 +125,8 @@ export const useAuth = () => {
   });
 
   // ========================================
-  // 2. 注册 Mutation
+  // 2. 注册 Mutation（旧版用户名注册，已由邮箱验证码注册替代）
+  // @deprecated UI 层不再调用，保留以兼容 Mock 模式
   // ========================================
   const registerMutation = useMutation({
     mutationFn: (form: AuthForm) => authService.register(form),
@@ -128,6 +139,60 @@ export const useAuth = () => {
         console.log("[useAuth] Register failed:", error.message);
       }
       showError(error.message || i18next.t("error.auth.registerFailed"));
+    },
+  });
+
+  // ========================================
+  // 2.1 发送邮箱验证码 Mutation
+  // ========================================
+  const sendCodeMutation = useMutation({
+    mutationFn: (req: EmailSendCodeRequest) => authService.sendEmailCode(req),
+    onSuccess: () => {
+      console.log("[useAuth] Email code sent successfully");
+      showSuccess(i18next.t("auth.code_sent"));
+    },
+    onError: (error: Error) => {
+      if (__DEV__) {
+        console.log("[useAuth] Send code failed:", error.message);
+      }
+      showError(error.message || i18next.t("error.auth.sendCodeFailed"));
+    },
+  });
+
+  // ========================================
+  // 2.2 邮箱验证码注册 Mutation
+  // ========================================
+  const emailRegisterMutation = useMutation({
+    mutationFn: (req: EmailRegisterRequest) => authService.emailRegister(req),
+    onSuccess: (data) => {
+      console.log("[useAuth] Email register success:", data.username);
+      showSuccess(i18next.t("auth.register_success"));
+    },
+    onError: (error: Error) => {
+      if (__DEV__) {
+        console.log("[useAuth] Email register failed:", error.message);
+      }
+      showError(error.message || i18next.t("error.auth.registerFailed"));
+    },
+  });
+
+  // ========================================
+  // 2.3 邮箱验证码登录 Mutation
+  // 登录成功后与密码登录一致：清理旧账号缓存 → 写入新用户状态
+  // ========================================
+  const emailLoginMutation = useMutation({
+    mutationFn: (req: EmailLoginRequest) => authService.emailLogin(req),
+    onSuccess: async (data: LoginResponse) => {
+      await clearAccountBoundCaches(currentUserId);
+      setAuth(data.user);
+      console.log("[useAuth] Email login success:", data.user.username);
+      showSuccess(i18next.t("auth.login_success"));
+    },
+    onError: (error: Error) => {
+      if (__DEV__) {
+        console.log("[useAuth] Email login failed:", error.message);
+      }
+      showError(error.message || i18next.t("error.auth.emailLoginFailed"));
     },
   });
 
@@ -177,6 +242,90 @@ export const useAuth = () => {
     },
   });
 
+  // ========================================
+  // 5. 修改密码 Mutation（已登录用户，旧密码验证）
+  // ========================================
+  const changePasswordMutation = useMutation({
+    mutationFn: (req: ChangePasswordRequest) => authService.changePassword(req),
+    onSuccess: () => {
+      console.log("[useAuth] Password changed successfully");
+      showSuccess(i18next.t("account.change_password_success"));
+    },
+    onError: (error: Error) => {
+      if (__DEV__) {
+        console.log("[useAuth] Change password failed:", error.message);
+      }
+      showError(error.message || i18next.t("error.auth.changePasswordFailed"));
+    },
+  });
+
+  // ========================================
+  // 6. 重置密码 Mutation（邮箱验证码，不需要登录态）
+  // ========================================
+  const resetPasswordMutation = useMutation({
+    mutationFn: (req: ResetPasswordRequest) => authService.resetPassword(req),
+    onSuccess: () => {
+      console.log("[useAuth] Password reset successfully");
+      showSuccess(i18next.t("account.reset_password_success"));
+    },
+    onError: (error: Error) => {
+      if (__DEV__) {
+        console.log("[useAuth] Reset password failed:", error.message);
+      }
+      showError(error.message || i18next.t("error.auth.resetPasswordFailed"));
+    },
+  });
+
+  // ========================================
+  // 7. 修改绑定邮箱 Mutation
+  // 成功后刷新用户信息，确保设置页显示新邮箱
+  // ========================================
+  const changeEmailMutation = useMutation({
+    mutationFn: (req: ChangeEmailRequest) => authService.changeEmail(req),
+    onSuccess: async (data) => {
+      console.log("[useAuth] Email changed to:", data.email);
+      // 刷新用户信息：从后端拉取最新用户数据并更新 Store + AsyncStorage
+      try {
+        const updatedUser = await authService.getCurrentUser();
+        setAuth(updatedUser);
+      } catch {
+        // 如果获取失败，至少本地更新邮箱字段
+        const currentUser = useAuthStore.getState().user;
+        if (currentUser) {
+          setAuth({ ...currentUser, email: data.email });
+        }
+      }
+      showSuccess(i18next.t("account.change_email_success"));
+    },
+    onError: (error: Error) => {
+      if (__DEV__) {
+        console.log("[useAuth] Change email failed:", error.message);
+      }
+      showError(error.message || i18next.t("error.auth.changeEmailFailed"));
+    },
+  });
+
+  // ========================================
+  // 8. 注销账户 Mutation
+  // 调用后端 DELETE /auth/me 删除账号及所有数据，然后清理本地状态并跳转登录页
+  // ========================================
+  const deleteAccountMutation = useMutation({
+    mutationFn: () => authService.deleteAccount(),
+    onSuccess: async () => {
+      console.log("[useAuth] Account deleted successfully");
+      await clearAccountBoundCaches(currentUserId);
+      clearAuth();
+      router.replace("/login");
+      showInfo(i18next.t("account.delete_account_success"));
+    },
+    onError: (error: Error) => {
+      if (__DEV__) {
+        console.log("[useAuth] Delete account failed:", error.message);
+      }
+      showError(error.message || i18next.t("error.auth.deleteAccountFailed"));
+    },
+  });
+
   return {
     // Actions
     login: loginMutation.mutate,
@@ -186,16 +335,63 @@ export const useAuth = () => {
     logout: logoutMutation.mutate,
     logoutAsync: logoutMutation.mutateAsync,
     refreshToken: refreshMutation.mutate,
+    sendCode: sendCodeMutation.mutate,
+    sendCodeAsync: sendCodeMutation.mutateAsync,
+    emailRegister: emailRegisterMutation.mutate,
+    emailRegisterAsync: emailRegisterMutation.mutateAsync,
+    emailLogin: emailLoginMutation.mutate,
+    emailLoginAsync: emailLoginMutation.mutateAsync,
+    changePassword: changePasswordMutation.mutate,
+    changePasswordAsync: changePasswordMutation.mutateAsync,
+    resetPassword: resetPasswordMutation.mutate,
+    resetPasswordAsync: resetPasswordMutation.mutateAsync,
+    changeEmail: changeEmailMutation.mutate,
+    changeEmailAsync: changeEmailMutation.mutateAsync,
+    deleteAccount: deleteAccountMutation.mutate,
+    deleteAccountAsync: deleteAccountMutation.mutateAsync,
 
     // Login States
     isLoggingIn: loginMutation.isPending,
     loginError: loginMutation.error,
     isLoginSuccess: loginMutation.isSuccess,
 
-    // Register States
+    // Register States（旧版，保留兼容）
     isRegistering: registerMutation.isPending,
     registerError: registerMutation.error,
     isRegisterSuccess: registerMutation.isSuccess,
+
+    // Send Code States
+    isSendingCode: sendCodeMutation.isPending,
+    sendCodeError: sendCodeMutation.error,
+
+    // Email Register States
+    isEmailRegistering: emailRegisterMutation.isPending,
+    emailRegisterError: emailRegisterMutation.error,
+    isEmailRegisterSuccess: emailRegisterMutation.isSuccess,
+
+    // Email Login States
+    isEmailLoggingIn: emailLoginMutation.isPending,
+    emailLoginError: emailLoginMutation.error,
+    isEmailLoginSuccess: emailLoginMutation.isSuccess,
+
+    // Change Password States
+    isChangingPassword: changePasswordMutation.isPending,
+    changePasswordError: changePasswordMutation.error,
+    isChangePasswordSuccess: changePasswordMutation.isSuccess,
+
+    // Reset Password States
+    isResettingPassword: resetPasswordMutation.isPending,
+    resetPasswordError: resetPasswordMutation.error,
+    isResetPasswordSuccess: resetPasswordMutation.isSuccess,
+
+    // Change Email States
+    isChangingEmail: changeEmailMutation.isPending,
+    changeEmailError: changeEmailMutation.error,
+    isChangeEmailSuccess: changeEmailMutation.isSuccess,
+
+    // Delete Account States
+    isDeletingAccount: deleteAccountMutation.isPending,
+    deleteAccountError: deleteAccountMutation.error,
 
     // Logout States
     isLoggingOut: logoutMutation.isPending,

@@ -102,6 +102,10 @@ api.interceptors.request.use(
       config.baseURL,
       config.url,
     );
+    // 调试：打印请求体，帮助定位 400 等参数错误
+    if (__DEV__ && config.data) {
+      console.log("[API Request Body]", JSON.stringify(config.data));
+    }
 
     try {
       // 使用 tokenService 统一获取 Token
@@ -135,6 +139,10 @@ api.interceptors.response.use(
 
     if (__DEV__) {
       console.log("[API Error]", error.response?.status, error.message);
+      // 调试：打印后端返回的错误详情，帮助定位参数/业务问题
+      if (error.response?.data) {
+        console.log("[API Error Body]", JSON.stringify(error.response.data));
+      }
     }
 
     // ========================================
