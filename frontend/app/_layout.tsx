@@ -20,6 +20,7 @@ import {
   clearSyncQueue,
   initDatabase,
 } from "../services/database";
+import { syncService } from "../services/syncService";
 import { useAuthStore } from "../store/useAuthStore";
 import {
   cleanupNetworkListener,
@@ -32,6 +33,7 @@ const queryClient = new QueryClient();
 
 export default function RootLayout() {
   const { isAuthenticated, isRestoring, loadAuth, clearAuth } = useAuthStore();
+  const currentUserId = useAuthStore((s) => s.user?.id);
   const segments = useSegments() as string[];
   const router = useRouter();
   const navigationState = useRootNavigationState();
@@ -65,30 +67,33 @@ export default function RootLayout() {
       console.log(
         "[RootLayout] Auth expired, clearing state and redirecting...",
       );
+      const expiredUserId = currentUserId;
+      void (async () => {
+        // 关键：认证失效时清理账号绑定缓存，避免仍能看到旧账号笔记
+        queryClient.removeQueries({ queryKey: ["notes"] });
+        queryClient.removeQueries({ queryKey: ["note"] });
 
-      // 关键：认证失效时清理账号绑定缓存，避免仍能看到旧账号笔记
-      queryClient.removeQueries({ queryKey: ["notes"] });
-      queryClient.removeQueries({ queryKey: ["note"] });
-      clearLocalNotes().catch(() => {
-        // ignore
-      });
-      // Phase B: 同步队列也需清理（账号隔离）
-      clearSyncQueue().catch(() => {
-        // ignore
-      });
+        await Promise.allSettled([
+          clearLocalNotes(),
+          // Phase B: 同步队列也需清理（账号隔离）
+          clearSyncQueue(),
+          // Phase C: 按用户清理增量游标
+          syncService.clearLastSyncTime(expiredUserId),
+        ]);
 
-      clearAuth();
-      // 确保导航器已准备好再跳转
-      if (navigationState?.key) {
-        router.replace("/login" as Href);
-      }
+        clearAuth();
+        // 确保导航器已准备好再跳转
+        if (navigationState?.key) {
+          router.replace("/login" as Href);
+        }
+      })();
     };
 
     authEventEmitter.on("AUTH_EXPIRED", handleAuthExpired);
     return () => {
       authEventEmitter.off("AUTH_EXPIRED", handleAuthExpired);
     };
-  }, [clearAuth, router, navigationState?.key]);
+  }, [clearAuth, currentUserId, router, navigationState?.key]);
 
   // ========================================
   // Phase B: 同步重放完成后刷新 React Query 缓存

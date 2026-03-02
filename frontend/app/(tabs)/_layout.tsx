@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "react-native-paper";
+import { useSyncEngine } from "../../hooks/useSyncEngine";
 
 import {
   selectUnviewedNoteCount,
@@ -17,6 +18,9 @@ export default function TabLayout() {
 
   // 用户尚未点进详情页查看过的新笔记数 → 阅读 Tab 角标
   const unreadCount = useUploadTaskStore(selectUnviewedNoteCount);
+
+  // Phase C：自动触发增量同步（启动可用后 + 网络恢复）
+  useSyncEngine({ autoRun: true });
 
   return (
     <Tabs

@@ -399,19 +399,22 @@ export const noteService = {
       return MOCK_NOTES;
     }
 
-    // 网络感知：离线时直接走本地缓存，无需等待 API 超时
-    const isOnline = useNetworkStore.getState().isOnline;
-
-    if (!isOnline) {
-      console.log("[Service] Offline detected, reading local cache directly");
-      const localNotes = await fetchLocalNotes();
-      // 离线时即使本地为空也不抛错（用户可能刚安装、未曾联网过）
+    // Phase C：Local-First
+    // 先读本地，保证列表在弱网/断网下可秒开。
+    const localNotes = await fetchLocalNotes();
+    if (localNotes.length > 0) {
       return localNotes;
     }
 
+    // 本地为空时再判断网络：离线则直接返回空数组
+    const isOnline = useNetworkStore.getState().isOnline;
+    if (!isOnline) {
+      console.log("[Service] Offline detected and local cache is empty");
+      return [];
+    }
+
     try {
-      // 优先从网络获取
-      // 注意：后端返回 { notes: [...] } 包装对象
+      // 兜底：首次启动/用户清缓存后，本地为空时拉一遍列表摘要
       const response = await api.get<NotesAPIResponse | RawNoteFromAPI[]>(
         ENDPOINTS.LIBRARY.GET_NOTE,
       );
@@ -433,21 +436,15 @@ export const noteService = {
       const notes = normalizeNotes(rawNotes);
       console.log(`[Service] Fetched ${notes.length} notes from API`);
 
-      // 如果网络请求成功，缓存到本地数据库 (Cache Aside Pattern)
-      // 注意：即便 notes 为空，也需要覆盖本地缓存，避免残留旧账号/旧数据
+      // 首次拉取后写入本地，后续以本地为主
       saveNotesToLocal(notes).catch((err: unknown) =>
         console.warn("Sync to local DB failed:", err),
       );
 
       return notes;
     } catch (error) {
-      console.warn("fetchNotes network error, falling back to local DB", error);
-      // 网络失败，降级读取本地缓存
-      const localNotes = await fetchLocalNotes();
-      if (localNotes.length > 0) {
-        return localNotes;
-      }
-      throw error; // 如果本地也没数据，抛出异常
+      console.warn("fetchNotes network error with empty local cache", error);
+      throw error;
     }
   },
 
@@ -478,12 +475,18 @@ export const noteService = {
       };
     }
 
+    // Phase C：详情也采用本地优先
+    // 在线时若本地已存在详情级缓存，直接返回；避免每次都打详情 API。
+    const localNote = await fetchLocalNoteById(noteId);
+    if (localNote && hasDetailLevelData(localNote)) {
+      return localNote;
+    }
+
     // 网络感知：离线时直接读本地缓存
     const isOnline = useNetworkStore.getState().isOnline;
 
     if (!isOnline) {
       console.log("[Service] Offline — reading note from local cache:", noteId);
-      const localNote = await fetchLocalNoteById(noteId);
       // 只返回包含详情级数据的缓存（列表级缓存不足以展示详情页）
       if (localNote && hasDetailLevelData(localNote)) return localNote;
       // 无缓存或仅列表级缓存 → 提示「未缓存」
@@ -509,7 +512,6 @@ export const noteService = {
       return note;
     } catch (error) {
       // API 失败时尝试读本地缓存作为兆底（仅返回详情级缓存，避免展示空白）
-      const localNote = await fetchLocalNoteById(noteId);
       if (localNote && hasDetailLevelData(localNote)) {
         console.log(
           "[Service] API failed, returning cached detail note:",
