@@ -1,6 +1,6 @@
 import asyncio
 import json
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -56,25 +56,31 @@ UPLOAD_SUCCESS_EXAMPLE = {
     },
 )
 async def upload_image(
-    files: List[UploadFile] = File(..., description="待上传的图片（最多10张）"),
+    files: List[UploadFile] = File([], description="待上传的图片（最多10张）"),
+    file: Optional[UploadFile] = File(None, description="兼容旧参数：单张图片 file"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """上传图片文件（支持多图，最多10张）"""
 
-    if not files:
+    incoming_files: List[UploadFile] = list(files or [])
+    if file is not None:
+        incoming_files.append(file)
+
+    if not incoming_files:
         raise HTTPException(400, "没有上传文件")
 
-    if len(files) > MAX_IMAGE_COUNT:
+    if len(incoming_files) > MAX_IMAGE_COUNT:
         raise HTTPException(400, "传入图片请小于或等于10张")
 
     pipeline = InputPipelineService(db)
     job, storage_results = pipeline.create_job(
-        files,
+        incoming_files,
         user_id=current_user.id,
         device_id=current_user.id,
         source="upload_api",
     )
+    normalized_storage_results = storage_results if isinstance(storage_results, list) else [storage_results]
 
     file_metas = (job.file_meta or {}).get("files", [])
 
@@ -87,7 +93,7 @@ async def upload_image(
                 file_size=sr.size or 0,
                 content_type=sr.content_type or "application/octet-stream",
             )
-            for i, sr in enumerate(storage_results)
+            for i, sr in enumerate(normalized_storage_results)
         ],
         upload_time=job.created_at,
         progress_url=f"/api/v1/upload/jobs/{job.id}/stream",

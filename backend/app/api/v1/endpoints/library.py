@@ -81,7 +81,7 @@ NOTE_JOB_SOURCE = "library_from_image"
 )
 async def create_note_from_image(
     background_tasks: BackgroundTasks,
-    files: Optional[List[UploadFile]] = File(None, description="待识别的图片（最多10张）"),
+    files: List[UploadFile] = File([], description="待识别的图片（最多10张）"),
     file: Optional[UploadFile] = File(None, description="兼容旧参数：单张图片 file"),
     note_type: str = Form("学习笔记", description="笔记分类"),
     tags: Optional[str] = Form(None, description="以逗号分隔的标签"),
@@ -154,7 +154,7 @@ async def create_note_from_image(
     dependencies=[Depends(check_doubao_available)],
 )
 async def extract_text_from_image(
-    files: Optional[List[UploadFile]] = File(None, description="待识别的图片（最多10张）"),
+    files: List[UploadFile] = File([], description="待识别的图片（最多10张）"),
     file: Optional[UploadFile] = File(None, description="兼容旧参数：单张图片 file"),
     output_format: str = Form("markdown", description="输出格式：markdown 或 plain_text"),
     detail: Optional[str] = Form(None, description="图像解析细节层级，可选 high/low/auto"),

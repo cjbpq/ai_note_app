@@ -4,6 +4,7 @@ import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formatdate, make_msgid
 
 from app.core.config import settings
 
@@ -42,10 +43,13 @@ class EmailService:
 </div>"""
 
     def _send(self, to_email: str, subject: str, html_body: str) -> bool:
+        message_id_domain = self._message_id_domain()
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
         msg["From"] = f"{settings.SMTP_FROM_NAME} <{settings.SMTP_USERNAME}>"
         msg["To"] = to_email
+        msg["Date"] = formatdate(localtime=True)
+        msg["Message-ID"] = make_msgid(domain=message_id_domain)
         msg.attach(MIMEText(html_body, "html", "utf-8"))
 
         try:
@@ -57,6 +61,13 @@ class EmailService:
         except Exception:
             logger.error("邮件发送失败 (to=%s)", to_email, exc_info=True)
             return False
+
+    @staticmethod
+    def _message_id_domain() -> str | None:
+        username = settings.SMTP_USERNAME.strip()
+        if "@" in username:
+            return username.rsplit("@", 1)[1]
+        return None
 
 
 email_service = EmailService()
