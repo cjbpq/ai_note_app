@@ -8,6 +8,7 @@ import { Image } from "expo-image";
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, View } from "react-native";
+import type { MD3Theme } from "react-native-paper";
 import { Card, Chip, Text, useTheme } from "react-native-paper";
 import { NoteCardProps } from "../types";
 
@@ -24,7 +25,7 @@ const escapeRegex = (str: string): string =>
 const renderHighlightedText = (
   text: string,
   query: string,
-  theme: ReturnType<typeof useTheme>,
+  theme: MD3Theme,
 ) => {
   if (!query) return text;
   const regex = new RegExp(`(${escapeRegex(query)})`, "gi");
@@ -58,7 +59,7 @@ export default function NoteCard({
 }: NoteCardProps) {
   const { t } = useTranslation();
   // 1. 获取当前主题颜色
-  const theme = useTheme();
+  const theme = useTheme<MD3Theme>();
   // 2. 图片加载状态
   const [imageError, setImageError] = useState(false);
 

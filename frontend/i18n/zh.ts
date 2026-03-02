@@ -259,7 +259,7 @@ export default {
     product: {
       name_cn: "邮雁智记",
       name_en: "SnapNote",
-      badge_version: "v0.1.1MVP",
+      badge_version: "v{{version}}MVP",
     },
     app_intro_section: "应用介绍",
     app_intro_text:
@@ -276,9 +276,9 @@ export default {
     version_section: "版本信息",
     version: {
       current_label: "当前版本",
-      current_value: "0.1.1",
+      current_value: "{{version}}",
       build_label: "构建版本",
-      build_value: "2026.3.1",
+      build_value: "{{build}}",
       runtime_label: "运行环境",
       runtime_value: "Expo / React Native",
     },

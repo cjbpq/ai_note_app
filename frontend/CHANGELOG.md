@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-03-03
+
+### Added
+
+- **Profile (User Center) MVP**: Delivered the full Profile/User Center navigation and related pages (Settings, Help & Feedback, About).
+- **Offline Sync (Phase C)**: Implemented a complete silent sync architecture for notes (local-first read + incremental sync + batch detail hydration + offline mutations replay).
+- **Auth Flows**: Integrated end-to-end auth APIs and UI flows (email verification for signup, email code login, password reset, email change verification, and account deletion).
+
+### Changed
+
+- **Math Rendering Coverage**: Expanded math-aware rendering to fully cover structured note fields and improved LaTeX environment protection.
+- **Sync UX**: Stabilized sync progress UI and strengthened account-switch cleanup to avoid transient stale data.
+
+### Fixed
+
+- **Account Data Isolation**: Prevented cached data from briefly appearing between account switches by enforcing atomic cleanup and initialization guards.
+
 ## [0.1.1] - 2026-02-28
 
 ### Added

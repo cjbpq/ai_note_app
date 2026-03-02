@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import Constants from "expo-constants";
 import { useRouter } from "expo-router";
 import React from "react";
 import { useTranslation } from "react-i18next";
@@ -16,6 +17,12 @@ export default function AboutScreen() {
   const { t } = useTranslation();
   const theme = useTheme();
   const router = useRouter();
+
+  // 版本信息统一从 Expo 配置读取，避免 i18n/页面里硬编码版本号。
+  // - expo.version: 由 app.json 的 expo.version 决定
+  // - nativeBuildVersion: iOS buildNumber / Android versionCode（取决于构建方式）
+  const appVersion = Constants.expoConfig?.version ?? "-";
+  const buildVersion = Constants.nativeBuildVersion ?? "-";
 
   return (
     <View
@@ -77,7 +84,7 @@ export default function AboutScreen() {
                 { color: theme.colors.onSecondaryContainer },
               ]}
             >
-              {t("about.product.badge_version")}
+              {t("about.product.badge_version", { version: appVersion })}
             </Text>
           </View>
         </View>
@@ -171,7 +178,7 @@ export default function AboutScreen() {
                 {t("about.version.current_label")}
               </Text>
               <Text style={[styles.kvValue, { color: theme.colors.onSurface }]}>
-                {t("about.version.current_value")}
+                {t("about.version.current_value", { version: appVersion })}
               </Text>
             </View>
             <View style={styles.kvRow}>
@@ -184,7 +191,7 @@ export default function AboutScreen() {
                 {t("about.version.build_label")}
               </Text>
               <Text style={[styles.kvValue, { color: theme.colors.onSurface }]}>
-                {t("about.version.build_value")}
+                {t("about.version.build_value", { build: buildVersion })}
               </Text>
             </View>
             <View style={styles.kvRow}>
