@@ -65,6 +65,12 @@ export default {
     upload_blocked: "当前无网络连接，无法上传图片",
     upload_blocked_short: "需联网上传",
   },
+  sync: {
+    syncing: "正在同步最新笔记...",
+    up_to_date: "已是最新",
+    pull_complete: "同步完成：更新 {{updated}} 条，删除 {{deleted}} 条",
+    caching_progress: "后台缓存笔记详情中 {{done}} / {{total}}",
+  },
   common: {
     close: "关闭",
     cancel: "取消",
@@ -135,6 +141,11 @@ export default {
     },
     category: {
       fetchFailed: "获取分类列表失败",
+    },
+    sync: {
+      pullFailed: "同步失败，请稍后重试",
+      batchCacheFailed: "后台缓存失败，请稍后重试",
+      replayFailed: "离线变更回放失败，请稍后重试",
     },
   },
   errors: {

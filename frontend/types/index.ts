@@ -207,6 +207,95 @@ export interface NotesAPIResponse {
 }
 
 /**
+ * 增量同步返回的轻量笔记摘要（不含 original_text / structured_data）
+ */
+export interface SyncNoteSummary {
+  id: string;
+  title?: string;
+  category?: string | null;
+  tags?: string[] | string | null;
+  image_urls?: string[];
+  image_filenames?: string[];
+  image_sizes?: number[];
+  is_favorite?: boolean;
+  is_archived?: boolean;
+  user_id?: string | null;
+  device_id?: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+/**
+ * GET /library/notes/sync 响应
+ */
+export interface NoteSyncResponse {
+  updated: SyncNoteSummary[];
+  deleted_ids: string[];
+  server_time: string;
+}
+
+/**
+ * POST /library/notes/batch 请求体
+ */
+export interface NoteBatchRequest {
+  note_ids: string[];
+}
+
+/**
+ * POST /library/notes/batch 响应
+ */
+export interface NoteBatchResponse {
+  notes: RawNoteFromAPI[];
+  total: number;
+}
+
+/**
+ * 离线批量变更类型（后端 mutations 接口）
+ */
+export type NoteMutationType = "update_note" | "set_favorite" | "delete_note";
+
+/**
+ * 单条离线变更请求项
+ */
+export interface NoteMutationItem {
+  op_id: string;
+  type: NoteMutationType;
+  note_id: string;
+  patch?: UpdateNoteRequest;
+  is_favorite?: boolean;
+}
+
+/**
+ * POST /library/notes/mutations 请求体
+ */
+export interface NoteMutationBatchRequest {
+  mutations: NoteMutationItem[];
+}
+
+/**
+ * 单条离线变更处理结果
+ */
+export interface NoteMutationResult {
+  op_id: string;
+  type: NoteMutationType;
+  note_id: string;
+  status: "applied" | "not_found" | "invalid" | "failed";
+  code: number;
+  message?: string | null;
+  updated_at?: string | null;
+}
+
+/**
+ * POST /library/notes/mutations 响应
+ */
+export interface NoteMutationBatchResponse {
+  results: NoteMutationResult[];
+  applied_count: number;
+  failed_count: number;
+  server_time: string;
+}
+
+/**
  * 笔记分类
  * 对应后端 GET /library/categories 聚合结果 + 本地新建分类
  * 数据来源：

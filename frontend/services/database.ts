@@ -42,6 +42,8 @@ export interface SyncQueueItem {
 }
 
 let db: SQLite.SQLiteDatabase | null = null;
+let schemaReady = false;
+let initPromise: Promise<void> | null = null;
 
 /**
  * 数据库版本号 — 每次 schema 变更时递增
@@ -55,7 +57,13 @@ let db: SQLite.SQLiteDatabase | null = null;
 const DB_VERSION = 6;
 
 // 获取数据库实例
-const getDB = async (): Promise<SQLite.SQLiteDatabase> => {
+const getDB = async (
+  skipEnsure: boolean = false,
+): Promise<SQLite.SQLiteDatabase> => {
+  if (!skipEnsure && !schemaReady) {
+    await initDatabase();
+  }
+
   if (db) {
     return db;
   }
@@ -65,27 +73,31 @@ const getDB = async (): Promise<SQLite.SQLiteDatabase> => {
 
 // 初始化数据库表结构（使用 PRAGMA user_version 增量迁移）
 export const initDatabase = async () => {
-  try {
-    const database = await getDB();
+  if (schemaReady) return;
+  if (initPromise) return initPromise;
 
-    // 启用 WAL 模式提高性能
-    await database.execAsync(`PRAGMA journal_mode = WAL;`);
+  initPromise = (async () => {
+    try {
+      const database = await getDB(true);
 
-    // 读取当前数据库版本号
-    const versionResult = await database.getFirstAsync<{
-      user_version: number;
-    }>(`PRAGMA user_version;`);
-    const currentVersion = versionResult?.user_version ?? 0;
+      // 启用 WAL 模式提高性能
+      await database.execAsync(`PRAGMA journal_mode = WAL;`);
 
-    console.log(
-      `📦 DB current version: ${currentVersion}, target: ${DB_VERSION}`,
-    );
+      // 读取当前数据库版本号
+      const versionResult = await database.getFirstAsync<{
+        user_version: number;
+      }>(`PRAGMA user_version;`);
+      const currentVersion = versionResult?.user_version ?? 0;
 
-    if (currentVersion === 0) {
-      // ── 全新安装 / 旧版 DROP TABLE 策略遗留（无版本号） ──
-      // 安全地删除可能存在的旧 schema 表，然后创建最新 schema
-      await database.execAsync(`DROP TABLE IF EXISTS notes;`);
-      await database.execAsync(`
+      console.log(
+        `📦 DB current version: ${currentVersion}, target: ${DB_VERSION}`,
+      );
+
+      if (currentVersion === 0) {
+        // ── 全新安装 / 旧版 DROP TABLE 策略遗留（无版本号） ──
+        // 安全地删除可能存在的旧 schema 表，然后创建最新 schema
+        await database.execAsync(`DROP TABLE IF EXISTS notes;`);
+        await database.execAsync(`
         CREATE TABLE IF NOT EXISTS notes (
           id TEXT PRIMARY KEY NOT NULL,
           title TEXT NOT NULL DEFAULT 'Untitled',
@@ -105,9 +117,9 @@ export const initDatabase = async () => {
           isSynced INTEGER DEFAULT 1
         );
       `);
-      console.log("📦 Created notes table (fresh install).");
-      // Phase B: 创建离线同步队列表
-      await database.execAsync(`
+        console.log("📦 Created notes table (fresh install).");
+        // Phase B: 创建离线同步队列表
+        await database.execAsync(`
         CREATE TABLE IF NOT EXISTS sync_queue (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           type TEXT NOT NULL,
@@ -117,20 +129,20 @@ export const initDatabase = async () => {
           retryCount INTEGER DEFAULT 0
         );
       `);
-      console.log("📦 Created sync_queue table (fresh install).");
-    } else if (currentVersion < DB_VERSION) {
-      // ── 增量迁移 ──
-      // 未来 schema 变更在此添加条件分支，例如：
-      // if (currentVersion < 6) {
-      //   await database.execAsync(`ALTER TABLE notes ADD COLUMN newField TEXT DEFAULT '';`);
-      // }
-      console.log(
-        `📦 Migrating database from v${currentVersion} to v${DB_VERSION}...`,
-      );
+        console.log("📦 Created sync_queue table (fresh install).");
+      } else if (currentVersion < DB_VERSION) {
+        // ── 增量迁移 ──
+        // 未来 schema 变更在此添加条件分支，例如：
+        // if (currentVersion < 6) {
+        //   await database.execAsync(`ALTER TABLE notes ADD COLUMN newField TEXT DEFAULT '';`);
+        // }
+        console.log(
+          `📦 Migrating database from v${currentVersion} to v${DB_VERSION}...`,
+        );
 
-      // v4 → v5: schema 不变，仅迁移策略升级（保留数据）
-      // 确保表存在（防御性）
-      await database.execAsync(`
+        // v4 → v5: schema 不变，仅迁移策略升级（保留数据）
+        // 确保表存在（防御性）
+        await database.execAsync(`
         CREATE TABLE IF NOT EXISTS notes (
           id TEXT PRIMARY KEY NOT NULL,
           title TEXT NOT NULL DEFAULT 'Untitled',
@@ -151,9 +163,9 @@ export const initDatabase = async () => {
         );
       `);
 
-      // v5 → v6: 新增 sync_queue 离线操作队列表
-      if (currentVersion < 6) {
-        await database.execAsync(`
+        // v5 → v6: 新增 sync_queue 离线操作队列表
+        if (currentVersion < 6) {
+          await database.execAsync(`
           CREATE TABLE IF NOT EXISTS sync_queue (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             type TEXT NOT NULL,
@@ -163,22 +175,31 @@ export const initDatabase = async () => {
             retryCount INTEGER DEFAULT 0
           );
         `);
-        console.log("📦 Created sync_queue table (migration v5→v6).");
+          console.log("📦 Created sync_queue table (migration v5→v6).");
+        }
+
+        console.log("📦 Migration complete.");
+      } else {
+        // ── 版本一致，无需迁移 ──
+        console.log("📦 Database schema up to date, preserving cached data.");
       }
 
-      console.log("📦 Migration complete.");
-    } else {
-      // ── 版本一致，无需迁移 ──
-      console.log("📦 Database schema up to date, preserving cached data.");
+      // 写入当前版本号
+      await database.execAsync(`PRAGMA user_version = ${DB_VERSION};`);
+
+      console.log("📦 SQLite database initialized (v" + DB_VERSION + ").");
+      schemaReady = true;
+    } catch (error) {
+      console.error("❌ Failed to initialize database:", error);
+      throw error;
+    } finally {
+      if (!schemaReady) {
+        initPromise = null;
+      }
     }
+  })();
 
-    // 写入当前版本号
-    await database.execAsync(`PRAGMA user_version = ${DB_VERSION};`);
-
-    console.log("📦 SQLite database initialized (v" + DB_VERSION + ").");
-  } catch (error) {
-    console.error("❌ Failed to initialize database:", error);
-  }
+  return initPromise;
 };
 
 /**
@@ -626,4 +647,186 @@ export const updateNoteSyncStatus = async (
     isSynced ? 1 : 0,
     noteId,
   ]);
+};
+
+/**
+ * 应用增量同步结果（Phase C）
+ *
+ * 说明：
+ * - updated：只包含列表级摘要（不含内容/结构化详情）
+ * - deletedIds：服务端已删除的笔记 ID
+ *
+ * 处理策略：
+ * - updated 走 Smart Merge，保护本地已有详情缓存
+ * - deletedIds 直接删除本地记录
+ */
+export const applyIncrementalSync = async (
+  updated: Note[],
+  deletedIds: string[],
+): Promise<void> => {
+  const database = await getDB();
+
+  if (Array.isArray(deletedIds) && deletedIds.length > 0) {
+    const placeholders = deletedIds.map(() => "?").join(",");
+    await database.runAsync(
+      `DELETE FROM notes WHERE id IN (${placeholders})`,
+      deletedIds,
+    );
+  }
+
+  if (Array.isArray(updated) && updated.length > 0) {
+    for (const note of updated) {
+      const localRow = await database.getFirstAsync<{
+        content: string;
+        structuredData: string;
+        imageUrls: string;
+      }>("SELECT content, structuredData, imageUrls FROM notes WHERE id = ?", [
+        note.id,
+      ]);
+
+      const incomingIsListLevel =
+        !note.structuredData ||
+        (!note.structuredData.summary &&
+          !note.structuredData.sections &&
+          !note.structuredData.keyPoints);
+
+      const local = localRow
+        ? localHasRichData(localRow)
+        : { hasRichContent: false, hasRichImages: false };
+
+      if (local.hasRichContent && incomingIsListLevel) {
+        const safeDate = note.date || new Date().toISOString();
+        const safeTags = Array.isArray(note.tags) ? note.tags : [];
+
+        const imageUpdateClause = local.hasRichImages
+          ? ""
+          : ", imageUrls = ?, imageFilenames = ?, imageSizes = ?";
+
+        const params: (string | number)[] = [
+          note.title || "Untitled",
+          safeDate,
+          note.updatedAt || safeDate,
+          JSON.stringify(safeTags),
+          note.category || "",
+          note.isFavorite ? 1 : 0,
+          note.isArchived ? 1 : 0,
+          note.userId || "",
+          note.deviceId || "",
+        ];
+
+        if (!local.hasRichImages) {
+          params.push(
+            JSON.stringify(note.imageUrls ?? []),
+            JSON.stringify(note.imageFilenames ?? []),
+            JSON.stringify(note.imageSizes ?? []),
+          );
+        }
+
+        params.push(note.id);
+
+        await database.runAsync(
+          `UPDATE notes SET
+            title = ?, date = ?, updatedAt = ?, tags = ?,
+            category = ?, isFavorite = ?, isArchived = ?,
+            userId = ?, deviceId = ?, isSynced = 1
+            ${imageUpdateClause}
+          WHERE id = ?`,
+          params,
+        );
+      } else {
+        await database.runAsync(
+          `INSERT OR REPLACE INTO notes
+          (id, title, content, date, updatedAt, tags, imageUrls, imageFilenames, imageSizes,
+           category, isFavorite, isArchived, userId, deviceId, structuredData, isSynced)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          // @ts-ignore SQLite 参数限制
+          noteToDbRow(note),
+        );
+      }
+    }
+  }
+};
+
+/**
+ * 批量保存详情级笔记（静默缓存）
+ *
+ * 与 saveNotesToLocal 的区别：
+ * - 此处传入的是详情级数据，允许覆盖本地同 ID 的列表级缓存
+ * - 不执行差集删除（避免误删）
+ */
+export const batchSaveDetailNotes = async (notes: Note[]): Promise<void> => {
+  const database = await getDB();
+
+  for (const note of notes) {
+    await database.runAsync(
+      `INSERT OR REPLACE INTO notes
+      (id, title, content, date, updatedAt, tags, imageUrls, imageFilenames, imageSizes,
+       category, isFavorite, isArchived, userId, deviceId, structuredData, isSynced)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      // @ts-ignore SQLite 参数限制
+      noteToDbRow(note),
+    );
+  }
+};
+
+/**
+ * 查询一组笔记中「未缓存详情」的 ID 列表
+ *
+ * 详情缓存判定：
+ * - content 非空，或
+ * - structuredData 含 summary/sections/keyPoints/rawText/title
+ */
+export const getUncachedNoteIds = async (
+  noteIds: string[],
+): Promise<string[]> => {
+  if (!Array.isArray(noteIds) || noteIds.length === 0) {
+    return [];
+  }
+
+  const database = await getDB();
+  const placeholders = noteIds.map(() => "?").join(",");
+
+  const rows = (await database.getAllAsync(
+    `SELECT id, content, structuredData FROM notes WHERE id IN (${placeholders})`,
+    noteIds,
+  )) as { id: string; content: string; structuredData: string }[];
+
+  const hasDetail = new Set<string>();
+
+  for (const row of rows) {
+    const hasContent =
+      typeof row.content === "string" && row.content.trim().length > 0;
+
+    let hasStructuredData = false;
+    if (
+      row.structuredData &&
+      row.structuredData !== "{}" &&
+      row.structuredData !== "null"
+    ) {
+      try {
+        const parsed = JSON.parse(row.structuredData) as {
+          summary?: unknown;
+          sections?: unknown;
+          keyPoints?: unknown;
+          rawText?: unknown;
+          title?: unknown;
+        };
+        hasStructuredData = !!(
+          parsed.summary ||
+          parsed.sections ||
+          parsed.keyPoints ||
+          parsed.rawText ||
+          parsed.title
+        );
+      } catch {
+        hasStructuredData = false;
+      }
+    }
+
+    if (hasContent || hasStructuredData) {
+      hasDetail.add(row.id);
+    }
+  }
+
+  return noteIds.filter((id) => !hasDetail.has(id));
 };

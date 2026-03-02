@@ -92,6 +92,14 @@ export const APP_CONFIG = {
   // 业务逻辑相关
   MAX_TITLE_LENGTH: 50, // 笔记标题最大长度
   MAX_CONTENT_PREVIEW_LENGTH: 100, // 列表页预览文字长度
+
+  // 离线同步相关（Phase C）
+  SYNC: {
+    // 后端 batch 接口单次上限 50 条
+    BATCH_SIZE: 50,
+    // 批次间隔（毫秒），避免瞬时高压
+    BATCH_DELAY_MS: 300,
+  },
 } as const;
 
 /**
@@ -107,6 +115,9 @@ export const ENDPOINTS = {
   LIBRARY: {
     UPLOAD_IMAGE: "/library/notes/from-image",
     GET_NOTE: "/library/notes",
+    SYNC_NOTES: "/library/notes/sync",
+    BATCH_NOTES: "/library/notes/batch",
+    MUTATIONS: "/library/notes/mutations",
     SEARCH_NOTES: "/library/search", // GET /library/search?q=keyword
     GET_CATEGORIES: "/library/categories",
     TOGGLE_FAVORITE: (id: string) => `/library/notes/${id}/favorite`,
@@ -128,4 +139,5 @@ export const STORAGE_KEYS = {
   UI_THEME_MODE: "ui_theme_mode", // 主题模式（浅色/深色/跟随系统）
   SEARCH_HISTORY: "search_history", // 本地搜索历史记录
   LOCAL_NEW_CATEGORIES: "local_new_categories", // 本地新建但尚未上传的分类名列表
+  LAST_SYNC_TIME: "last_sync_time", // 增量同步游标（服务端时间）
 } as const;

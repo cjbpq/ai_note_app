@@ -66,6 +66,12 @@ export default {
     upload_blocked: "No network connection. Cannot upload images.",
     upload_blocked_short: "Requires network",
   },
+  sync: {
+    syncing: "Syncing latest notes...",
+    up_to_date: "Already up to date",
+    pull_complete: "Sync completed: {{updated}} updated, {{deleted}} deleted",
+    caching_progress: "Caching note details in background {{done}} / {{total}}",
+  },
   common: {
     close: "Close",
     cancel: "Cancel",
@@ -136,6 +142,11 @@ export default {
     },
     category: {
       fetchFailed: "Failed to load categories",
+    },
+    sync: {
+      pullFailed: "Sync failed. Please try again later",
+      batchCacheFailed: "Background cache failed. Please try again later",
+      replayFailed: "Offline replay failed. Please try again later",
     },
   },
   errors: {

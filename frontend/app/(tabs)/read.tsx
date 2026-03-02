@@ -13,9 +13,21 @@
  *   选中分类后自动过滤列表并关闭 Drawer
  */
 import { Href, useRouter } from "expo-router";
-import React, { useCallback, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
-import { ActivityIndicator, FlatList, StyleSheet, View } from "react-native";
+import {
+  ActivityIndicator,
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  View,
+} from "react-native";
 import { Drawer } from "react-native-drawer-layout";
 import { Appbar, Text, useTheme } from "react-native-paper";
 import {
@@ -27,6 +39,7 @@ import NoteCard from "../../components/note-card";
 import { CategoryDrawer } from "../../components/read";
 import { useCategories } from "../../hooks/useCategories";
 import { useNotes } from "../../hooks/useNotes";
+import { useSyncEngine } from "../../hooks/useSyncEngine";
 import {
   countUncategorizedNotes,
   filterNotesByCategory,
@@ -42,12 +55,50 @@ export default function ReadScreen() {
   // ── 数据 Hook ──
   const { notes, isLoading, isError } = useNotes();
   const { categories } = useCategories();
+  const { triggerSync, isRefreshing, cacheProgress, isSyncing, lastResult } =
+    useSyncEngine({
+      autoRun: false,
+    });
 
   // ── Drawer 状态 ──
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   // ── 分类筛选状态（null = 全部） ──
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [syncHint, setSyncHint] = useState<string | null>(null);
+  const syncHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (syncHintTimerRef.current) {
+        clearTimeout(syncHintTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!lastResult) return;
+
+    const hasChanges =
+      lastResult.updatedCount > 0 || lastResult.deletedCount > 0;
+
+    setSyncHint(
+      hasChanges
+        ? t("sync.pull_complete", {
+            updated: lastResult.updatedCount,
+            deleted: lastResult.deletedCount,
+          })
+        : t("sync.up_to_date"),
+    );
+
+    if (syncHintTimerRef.current) {
+      clearTimeout(syncHintTimerRef.current);
+    }
+
+    syncHintTimerRef.current = setTimeout(() => {
+      setSyncHint(null);
+    }, 1500);
+  }, [lastResult, t]);
 
   // ── 按分类过滤后的笔记列表 ──
   const filteredNotes = useMemo(
@@ -73,6 +124,17 @@ export default function ReadScreen() {
     router.push(`/note/${noteId}` as Href);
   };
 
+  // ── 下拉刷新：触发 Phase C 增量同步 ──
+  const handleRefresh = useCallback(async () => {
+    if (isRefreshing) return;
+
+    try {
+      await triggerSync();
+    } catch {
+      // 错误提示由 useSyncEngine 统一处理
+    }
+  }, [isRefreshing, triggerSync]);
+
   // ── Appbar 副标题：当前筛选说明 ──
   const subtitle = useMemo(() => {
     if (!selectedCategory) return undefined;
@@ -82,6 +144,49 @@ export default function ReadScreen() {
         : selectedCategory;
     return `${label} (${filteredNotes.length})`;
   }, [selectedCategory, filteredNotes.length, t]);
+
+  const activeSyncBanner = useMemo(() => {
+    if (isSyncing) {
+      return {
+        text: t("sync.syncing"),
+        backgroundColor: theme.colors.primaryContainer,
+        textColor: theme.colors.onPrimaryContainer,
+      };
+    }
+
+    if (cacheProgress.total > 0 && cacheProgress.done < cacheProgress.total) {
+      return {
+        text: t("sync.caching_progress", {
+          done: cacheProgress.done,
+          total: cacheProgress.total,
+        }),
+        backgroundColor: theme.colors.tertiaryContainer,
+        textColor: theme.colors.onTertiaryContainer,
+      };
+    }
+
+    if (syncHint) {
+      return {
+        text: syncHint,
+        backgroundColor: theme.colors.secondaryContainer,
+        textColor: theme.colors.onSecondaryContainer,
+      };
+    }
+
+    return null;
+  }, [
+    cacheProgress.done,
+    cacheProgress.total,
+    isSyncing,
+    syncHint,
+    t,
+    theme.colors.onPrimaryContainer,
+    theme.colors.onSecondaryContainer,
+    theme.colors.onTertiaryContainer,
+    theme.colors.primaryContainer,
+    theme.colors.secondaryContainer,
+    theme.colors.tertiaryContainer,
+  ]);
 
   // ── 内容区渲染 ──
   const renderContent = () => {
@@ -108,16 +213,31 @@ export default function ReadScreen() {
     // 空列表状态
     if (!filteredNotes || filteredNotes.length === 0) {
       return (
-        <View style={styles.centerContainer}>
-          <Text
-            variant="bodyLarge"
-            style={{ color: theme.colors.onSurfaceVariant }}
-          >
-            {selectedCategory
-              ? t("category.empty_state")
-              : t("noteDetail.no_content")}
-          </Text>
-        </View>
+        <FlatList
+          data={[]}
+          keyExtractor={(_, index) => `empty-${index}`}
+          renderItem={() => null}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={handleRefresh}
+              colors={[theme.colors.primary]}
+              tintColor={theme.colors.primary}
+            />
+          }
+          ListEmptyComponent={
+            <View style={styles.centerContainer}>
+              <Text
+                variant="bodyLarge"
+                style={{ color: theme.colors.onSurfaceVariant }}
+              >
+                {selectedCategory
+                  ? t("category.empty_state")
+                  : t("noteDetail.no_content")}
+              </Text>
+            </View>
+          }
+        />
       );
     }
 
@@ -127,6 +247,14 @@ export default function ReadScreen() {
         data={filteredNotes}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            colors={[theme.colors.primary]}
+            tintColor={theme.colors.primary}
+          />
+        }
         renderItem={({ item }) => (
           <NoteCard
             title={item.title}
@@ -188,7 +316,27 @@ export default function ReadScreen() {
           )}
         </Appbar.Header>
 
-        <View style={styles.container}>{renderContent()}</View>
+        <View style={styles.container}>
+          <View style={styles.syncHintSlot}>
+            {activeSyncBanner ? (
+              <View
+                style={[
+                  styles.syncHintContainer,
+                  { backgroundColor: activeSyncBanner.backgroundColor },
+                ]}
+              >
+                <Text
+                  variant="labelSmall"
+                  style={{ color: activeSyncBanner.textColor }}
+                >
+                  {activeSyncBanner.text}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+
+          {renderContent()}
+        </View>
       </SafeAreaView>
     </Drawer>
   );
@@ -213,5 +361,14 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingVertical: 10,
+  },
+  syncHintContainer: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  syncHintSlot: {
+    minHeight: 30,
   },
 });

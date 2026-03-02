@@ -16,8 +16,7 @@
  *   也可由用户手动触发（如设置页"立即同步"按钮 — 未来迭代）。
  */
 
-import { ENDPOINTS } from "../constants/config";
-import api from "./api";
+import { NoteMutationItem, NoteMutationResult } from "../types";
 import {
   fetchPendingSyncOps,
   getPendingSyncCount,
@@ -26,6 +25,7 @@ import {
   updateNoteSyncStatus,
   type SyncQueueItem,
 } from "./database";
+import { syncService } from "./syncService";
 
 // ============================================================================
 // 常量配置
@@ -99,61 +99,20 @@ export const replaySyncQueue = async (): Promise<SyncReplayResult> => {
 
   try {
     const operations = await fetchPendingSyncOps();
+    const actionableOps = operations.filter(
+      (op) => op.retryCount < MAX_SYNC_RETRIES,
+    );
 
-    for (const op of operations) {
-      // 超过最大重试次数 → 跳过，不删除（留待用户处理或下次手动同步）
-      if (op.retryCount >= MAX_SYNC_RETRIES) {
-        console.warn(
-          `[SyncEngine] Skipping op #${op.id} (${op.type} note:${op.noteId}) — exceeded max retries (${op.retryCount})`,
-        );
-        result.skipped++;
-        continue;
-      }
+    result.skipped = operations.length - actionableOps.length;
 
-      try {
-        await replaySingleOperation(op);
-        // 成功：移除队列条目 + 标记笔记已同步
-        await removeSyncOperation(op.id);
-        // delete 操作后笔记已不存在，不需要标记 isSynced
-        if (op.type !== "delete") {
-          await updateNoteSyncStatus(op.noteId, true);
-        }
-        result.succeeded++;
-        console.log(
-          `[SyncEngine] ✅ Replayed op #${op.id}: ${op.type} note:${op.noteId}`,
-        );
-      } catch (error: unknown) {
-        // 特殊处理：404 表示笔记已在服务端不存在
-        // 对于 edit/favorite 操作遇到 404，意味着笔记已被删除，直接移除队列条目
-        const statusCode = extractStatusCode(error);
-        if (statusCode === 404 && op.type !== "delete") {
-          console.warn(
-            `[SyncEngine] Op #${op.id}: note ${op.noteId} not found on server (404), removing from queue`,
-          );
-          await removeSyncOperation(op.id);
-          result.succeeded++; // 视为"已处理"
-          continue;
-        }
-
-        // 对于 delete 操作遇到 404，也视为成功（本就是要删除的）
-        if (statusCode === 404 && op.type === "delete") {
-          console.log(
-            `[SyncEngine] Op #${op.id}: delete target already gone (404), removing from queue`,
-          );
-          await removeSyncOperation(op.id);
-          result.succeeded++;
-          continue;
-        }
-
-        // 其他错误：增加重试计数
-        await incrementSyncRetry(op.id);
-        result.failed++;
-        console.error(
-          `[SyncEngine] ❌ Failed op #${op.id}: ${op.type} note:${op.noteId}`,
-          error,
-        );
-      }
+    if (actionableOps.length === 0) {
+      return result;
     }
+
+    const mutations = actionableOps.map(toMutationItem);
+    const response = await syncService.replayMutationsBatch(mutations);
+
+    await applyMutationResults(actionableOps, response.results, result);
   } finally {
     isSyncing = false;
   }
@@ -166,33 +125,83 @@ export const replaySyncQueue = async (): Promise<SyncReplayResult> => {
 };
 
 // ============================================================================
-// 单条操作重放
+// 批量回放结果处理
 // ============================================================================
 
 /**
- * 根据操作类型调用对应的后端 API
+ * 本地 queue op 转后端 mutations item
  */
-const replaySingleOperation = async (op: SyncQueueItem): Promise<void> => {
+const toMutationItem = (op: SyncQueueItem): NoteMutationItem => {
   const payload = parsePayload(op.payload);
 
-  switch (op.type) {
-    case "edit":
-      // PUT /library/notes/:id — payload 已经是 toAPIFormat 后的格式
-      await api.put(`${ENDPOINTS.LIBRARY.GET_NOTE}/${op.noteId}`, payload);
-      break;
+  if (op.type === "edit") {
+    return {
+      op_id: String(op.id),
+      type: "update_note",
+      note_id: op.noteId,
+      patch: payload,
+    };
+  }
 
-    case "delete":
-      // DELETE /library/notes/:id
-      await api.delete(`${ENDPOINTS.LIBRARY.GET_NOTE}/${op.noteId}`);
-      break;
+  if (op.type === "favorite") {
+    return {
+      op_id: String(op.id),
+      type: "set_favorite",
+      note_id: op.noteId,
+      is_favorite: !!payload.is_favorite,
+    };
+  }
 
-    case "favorite":
-      // POST /library/notes/:id/favorite
-      await api.post(ENDPOINTS.LIBRARY.TOGGLE_FAVORITE(op.noteId));
-      break;
+  return {
+    op_id: String(op.id),
+    type: "delete_note",
+    note_id: op.noteId,
+  };
+};
 
-    default:
-      console.warn(`[SyncEngine] Unknown operation type: ${op.type}`);
+/**
+ * 根据 mutations 返回结果更新本地队列与统计
+ */
+const applyMutationResults = async (
+  ops: SyncQueueItem[],
+  results: NoteMutationResult[],
+  summary: SyncReplayResult,
+): Promise<void> => {
+  const opMap = new Map<number, SyncQueueItem>();
+  for (const op of ops) {
+    opMap.set(op.id, op);
+  }
+
+  for (const item of results) {
+    const opId = Number(item.op_id);
+    const op = Number.isNaN(opId) ? undefined : opMap.get(opId);
+
+    if (!op) {
+      continue;
+    }
+
+    // 成功、目标不存在都视为已处理，移除队列
+    if (item.status === "applied" || item.status === "not_found") {
+      await removeSyncOperation(op.id);
+      if (op.type !== "delete") {
+        await updateNoteSyncStatus(op.noteId, true);
+      }
+      summary.succeeded++;
+      continue;
+    }
+
+    // invalid / failed 进入重试
+    await incrementSyncRetry(op.id);
+    summary.failed++;
+  }
+
+  // 防御：results 中未出现的任务，计为失败并增加重试
+  const handledIds = new Set(results.map((item) => Number(item.op_id)));
+  for (const op of ops) {
+    if (!handledIds.has(op.id)) {
+      await incrementSyncRetry(op.id);
+      summary.failed++;
+    }
   }
 };
 
@@ -209,16 +218,4 @@ const parsePayload = (raw: string): Record<string, unknown> => {
   } catch {
     return {};
   }
-};
-
-/**
- * 从 Axios 错误中提取 HTTP 状态码
- */
-const extractStatusCode = (error: unknown): number | undefined => {
-  if (error && typeof error === "object") {
-    // Axios error 通常有 response.status
-    const axiosError = error as { response?: { status?: number } };
-    return axiosError.response?.status;
-  }
-  return undefined;
 };

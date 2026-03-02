@@ -7,6 +7,7 @@ import { authService } from "../services/authService";
 import { clearLocalNewCategories } from "../services/categoryService";
 import { clearLocalNotes, clearSyncQueue } from "../services/database";
 import { searchHistoryService } from "../services/searchHistoryService";
+import { syncService } from "../services/syncService";
 import { useAuthStore } from "../store/useAuthStore";
 import { AuthForm, LoginResponse, ServiceError } from "../types";
 import { useToast } from "./useToast";
@@ -28,6 +29,7 @@ export const useAuth = () => {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { showError, showSuccess, showInfo } = useToast();
+  const currentUserId = useAuthStore((state) => state.user?.id);
   const setAuth = useAuthStore((state) => state.setAuth);
   const clearAuth = useAuthStore((state) => state.clearAuth);
 
@@ -36,29 +38,34 @@ export const useAuth = () => {
    * - React Query: 避免跨账号复用同一份 query cache
    * - SQLite: 本地仅做临时缓存，切换账号必须清空避免串号
    */
-  const clearAccountBoundCaches = useCallback(() => {
-    queryClient.removeQueries({ queryKey: ["notes"] });
-    queryClient.removeQueries({ queryKey: ["note"] });
-    queryClient.removeQueries({ queryKey: ["categories"] });
-    queryClient.removeQueries({ queryKey: ["searchHistory"] });
+  const clearAccountBoundCaches = useCallback(
+    async (userId?: string) => {
+      queryClient.removeQueries({ queryKey: ["notes"] });
+      queryClient.removeQueries({ queryKey: ["note"] });
+      queryClient.removeQueries({ queryKey: ["categories"] });
+      queryClient.removeQueries({ queryKey: ["searchHistory"] });
 
-    // 清理旧版本遗留的“全局共享 key”，避免升级后继续串号
-    clearLocalNewCategories().catch((e) => {
-      console.warn("[useAuth] Failed to clear legacy local categories:", e);
-    });
-    searchHistoryService.clearAll().catch((e) => {
-      console.warn("[useAuth] Failed to clear legacy search history:", e);
-    });
+      const clearResults = await Promise.allSettled([
+        clearLocalNewCategories(userId),
+        searchHistoryService.clearAll(userId),
+        clearLocalNotes(),
+        // Phase B: 清空离线同步队列（账号隔离，避免旧账号操作被新账号重放）
+        clearSyncQueue(),
+        // Phase C: 清除增量同步游标，避免账号间串用 since
+        syncService.clearLastSyncTime(userId),
+      ]);
 
-    clearLocalNotes().catch((e) => {
-      console.warn("[useAuth] Failed to clear local notes cache:", e);
-    });
-
-    // Phase B: 清空离线同步队列（账号隔离，避免旧账号操作被新账号重放）
-    clearSyncQueue().catch((e) => {
-      console.warn("[useAuth] Failed to clear sync queue:", e);
-    });
-  }, [queryClient]);
+      clearResults.forEach((item) => {
+        if (item.status === "rejected") {
+          console.warn(
+            "[useAuth] Failed to clear account bound cache:",
+            item.reason,
+          );
+        }
+      });
+    },
+    [queryClient],
+  );
 
   // ========================================
   // 监听认证过期事件
@@ -67,9 +74,15 @@ export const useAuth = () => {
   useEffect(() => {
     const handleAuthExpired = () => {
       console.log("[useAuth] Auth expired, redirecting to login...");
-      clearAccountBoundCaches();
-      clearAuth();
-      router.replace("/login");
+      const expiredUserId = currentUserId;
+      clearAccountBoundCaches(expiredUserId)
+        .finally(() => {
+          clearAuth();
+          router.replace("/login");
+        })
+        .catch(() => {
+          // 忽略，最终流程在 finally 统一收口
+        });
     };
 
     authEventEmitter.on("AUTH_EXPIRED", handleAuthExpired);
@@ -77,7 +90,7 @@ export const useAuth = () => {
     return () => {
       authEventEmitter.off("AUTH_EXPIRED", handleAuthExpired);
     };
-  }, [clearAccountBoundCaches, clearAuth, router]);
+  }, [clearAccountBoundCaches, clearAuth, currentUserId, router]);
 
   // ========================================
   // 1. 登录 Mutation
@@ -85,9 +98,9 @@ export const useAuth = () => {
   const loginMutation = useMutation({
     mutationFn: (form: Pick<AuthForm, "username" | "password">) =>
       authService.login(form),
-    onSuccess: (data: LoginResponse) => {
+    onSuccess: async (data: LoginResponse) => {
       // 切换账号 / 重新登录：先清理旧账号缓存，再写入新用户状态
-      clearAccountBoundCaches();
+      await clearAccountBoundCaches(currentUserId);
       // 登录成功，更新 Store（Token 已由 Service 保存）
       setAuth(data.user);
       console.log("[useAuth] Login success:", data.user.username);
@@ -123,16 +136,16 @@ export const useAuth = () => {
   // ========================================
   const logoutMutation = useMutation({
     mutationFn: () => authService.logout(),
-    onSuccess: () => {
-      clearAccountBoundCaches();
+    onSuccess: async () => {
+      await clearAccountBoundCaches(currentUserId);
       clearAuth();
       router.replace("/login");
       console.log("[useAuth] Logout success");
       showInfo(i18next.t("auth.logout_success"));
     },
-    onError: (error: Error) => {
+    onError: async (error: Error) => {
       // 即使退出失败，也清理本地状态
-      clearAccountBoundCaches();
+      await clearAccountBoundCaches(currentUserId);
       clearAuth();
       router.replace("/login");
       if (__DEV__) {
