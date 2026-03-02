@@ -13,7 +13,17 @@ from sqlalchemy.orm import Session
 from app.models.upload_job import UploadJob
 from app.services.storage_backends import LocalStorageBackend, StorageBackend, StorageResult
 
-ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff"}
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tiff", ".tif", ".webp"}
+MIME_EXTENSION_OVERRIDES = {
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/bmp": ".bmp",
+    "image/tiff": ".tiff",
+    "image/x-tiff": ".tiff",
+    "image/webp": ".webp",
+}
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB per file
 MAX_IMAGE_COUNT = 10
 MAX_CONCURRENT_NOTE_JOBS_PER_USER = 10
@@ -30,6 +40,33 @@ class InputPipelineService:
         if hasattr(files, "filename") and hasattr(files, "file"):
             return [files]
         return list(files or [])
+
+    def _resolve_extension(self, *, filename: str, content_type: Optional[str]) -> str:
+        extension = os.path.splitext(filename)[1].lower()
+        if extension in ALLOWED_EXTENSIONS:
+            return extension
+
+        normalized_content_type = (content_type or "").lower().strip()
+        if normalized_content_type:
+            fallback_extension = (
+                MIME_EXTENSION_OVERRIDES.get(normalized_content_type)
+                or mimetypes.guess_extension(normalized_content_type)
+                or ""
+            )
+            fallback_extension = fallback_extension.lower()
+            if fallback_extension in ALLOWED_EXTENSIONS:
+                return fallback_extension
+
+        if extension:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported file type: {extension}",
+            )
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported file type: missing extension and unknown content-type",
+        )
 
     def create_job(
         self,
@@ -53,34 +90,29 @@ class InputPipelineService:
         binary_payloads = []
 
         for file in file_list:
-            if not file.filename:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing filename")
-
-            extension = os.path.splitext(file.filename)[1].lower()
-            if extension not in ALLOWED_EXTENSIONS:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Unsupported file type: {extension}",
-                )
+            original_name = file.filename or "uploaded"
+            extension = self._resolve_extension(filename=original_name, content_type=file.content_type)
+            if not os.path.splitext(original_name)[1]:
+                original_name = f"{original_name}{extension}"
 
             file_bytes = file.file.read()
             if not file_bytes:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Empty file: {file.filename}",
+                    detail=f"Empty file: {original_name}",
                 )
             file_size = len(file_bytes)
             if file_size > MAX_FILE_SIZE:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"File too large (10MB max): {file.filename}",
+                    detail=f"File too large (10MB max): {original_name}",
                 )
 
             checksum = hashlib.sha256(file_bytes).hexdigest()
-            content_type = file.content_type or mimetypes.guess_type(file.filename)[0] or "application/octet-stream"
+            content_type = file.content_type or mimetypes.guess_type(original_name)[0] or "application/octet-stream"
             file_metas.append(
                 {
-                    "original_name": file.filename,
+                    "original_name": original_name,
                     "extension": extension,
                     "size": file_size,
                     "content_type": content_type,

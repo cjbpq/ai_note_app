@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     SMTP_USE_SSL: bool = True
     SMTP_USERNAME: str = ""
     SMTP_PASSWORD: str = ""
-    SMTP_FROM_NAME: str = "AI Note"
+    SMTP_FROM_NAME: str = "Snap Note"
 
     # Database
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/ai_note_app"
