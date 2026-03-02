@@ -1,17 +1,22 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { Href, useRouter } from "expo-router";
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ScrollView, StyleSheet, View } from "react-native";
 import {
   Appbar,
+  Button,
+  Dialog,
   Divider,
   List,
+  Paragraph,
+  Portal,
   Switch,
   Text,
   useTheme,
 } from "react-native-paper";
 import { ThemeModeToggle } from "../components/common";
+import { useAuth } from "../hooks/useAuth";
 import { useAuthStore } from "../store/useAuthStore";
 
 /**
@@ -27,9 +32,12 @@ export default function UserSettingsScreen() {
   const theme = useTheme();
   const router = useRouter();
   const { user } = useAuthStore();
+  const { deleteAccount, isDeletingAccount } = useAuth();
 
   // MVP：通知开关仅做本地展示状态，后续再接真实配置持久化
   const [notificationEnabled, setNotificationEnabled] = useState(false);
+  // 注销账户确认弹窗
+  const [deleteDialogVisible, setDeleteDialogVisible] = useState(false);
 
   const disabledTextColor =
     theme.colors.onSurfaceDisabled ?? theme.colors.onSurfaceVariant;
@@ -92,11 +100,22 @@ export default function UserSettingsScreen() {
                 )}
               />
             )}
+            right={() => (
+              <Button
+                mode="text"
+                compact
+                onPress={() => router.push("/change-email" as Href)}
+                style={styles.changeEmailButton}
+              >
+                {t("settings.detail.change_email_button")}
+              </Button>
+            )}
           />
           <Divider />
 
           <List.Item
             title={t("settings.detail.change_password")}
+            onPress={() => router.push("/change-password" as Href)}
             left={(props) => (
               <List.Icon
                 {...props}
@@ -191,7 +210,49 @@ export default function UserSettingsScreen() {
             )}
           />
         </View>
+
+        {/* 注销账户按钮 — 红色 outlined，位于页面最底部 */}
+        <Button
+          mode="outlined"
+          onPress={() => setDeleteDialogVisible(true)}
+          loading={isDeletingAccount}
+          disabled={isDeletingAccount}
+          textColor={theme.colors.error}
+          style={[styles.deleteButton, { borderColor: theme.colors.error }]}
+          icon="account-remove-outline"
+        >
+          {t("account.delete_account_button")}
+        </Button>
       </ScrollView>
+
+      {/* 注销账户确认弹窗 */}
+      <Portal>
+        <Dialog
+          visible={deleteDialogVisible}
+          onDismiss={() => setDeleteDialogVisible(false)}
+        >
+          <Dialog.Title>{t("account.delete_account_title")}</Dialog.Title>
+          <Dialog.Content>
+            <Paragraph>{t("account.delete_account_message")}</Paragraph>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setDeleteDialogVisible(false)}>
+              {t("account.delete_account_cancel")}
+            </Button>
+            <Button
+              textColor={theme.colors.error}
+              loading={isDeletingAccount}
+              disabled={isDeletingAccount}
+              onPress={() => {
+                setDeleteDialogVisible(false);
+                deleteAccount();
+              }}
+            >
+              {t("account.delete_account_confirm")}
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
     </View>
   );
 }
@@ -224,5 +285,13 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     marginRight: 16,
     fontSize: 14,
+  },
+  changeEmailButton: {
+    alignSelf: "center",
+    marginRight: 4,
+  },
+  deleteButton: {
+    marginTop: 8,
+    borderWidth: 1,
   },
 });
