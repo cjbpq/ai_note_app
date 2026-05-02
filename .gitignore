@@ -1,0 +1,55 @@
+# Local environment files
+**/.env
+**/.env.local
+**/.env.*.local
+!**/.env.example
+!**/.env.test
+
+# AI/local agent state
+**/.claude/
+**/.codex/
+**/.cursor/
+**/.workflow/
+
+# Python and test artifacts
+**/__pycache__/
+**/.pytest_cache/
+**/.coverage
+**/coverage.xml
+**/htmlcov/
+**/.ruff_cache/
+**/.mypy_cache/
+**/.nox/
+**/.tox/
+
+# Local data and database byproducts
+**/*.db
+**/*.db.*
+**/*.sqlite
+**/*.sqlite3
+**/*.sqlite-wal
+**/*.sqlite-shm
+**/*.sqlite3-wal
+**/*.sqlite3-shm
+**/users_data.json
+**/logs/
+**/*.log
+
+# Generated benchmark outputs
+backend/benchmarks/results/
+
+# Frontend build and signing outputs
+frontend/.eas/
+frontend/build/
+frontend/coverage/
+frontend/.nyc_output/
+frontend/.eslintcache
+frontend/*.apk
+frontend/*.aab
+frontend/*.ipa
+frontend/*.keystore
+frontend/*.jks
+frontend/*.p8
+frontend/*.p12
+frontend/*.key
+frontend/*.mobileprovision
