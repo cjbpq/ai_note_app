@@ -1,4 +1,5 @@
 import asyncio
+import io
 import types
 import uuid
 
@@ -10,6 +11,13 @@ from app.models.upload_job import UploadJob
 from app.services import pipeline_runner
 
 client = TestClient(app)
+
+MINIMAL_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+    b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00"
+    b"\x00\x0cIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe\x02\xfe"
+    b"\xdc\xccY\xe7\x00\x00\x00\x00IEND\xaeB`\x82"
+)
 
 
 def _register_and_login(username: str, password: str = "pass1234") -> tuple[str, str]:
@@ -34,6 +42,7 @@ def test_create_note_from_image_enqueues_background_task(monkeypatch):
     headers = {"Authorization": f"Bearer {token}"}
 
     from app.api.v1.endpoints import library
+    from app.core import dependencies
 
     async def dummy_process(*args, **kwargs):
         dummy_process.called = True
@@ -54,21 +63,19 @@ def test_create_note_from_image_enqueues_background_task(monkeypatch):
 
     fake_create_task.coro = None
 
+    dummy_doubao_service = types.SimpleNamespace(is_available=True, availability_status=lambda: (True, None))
+
     monkeypatch.setattr(library, "process_note_job", dummy_process)
     monkeypatch.setattr(library.asyncio, "create_task", fake_create_task)
-    monkeypatch.setattr(
-        library,
-        "doubao_service",
-        types.SimpleNamespace(is_available=True, availability_status=lambda: (True, None)),
-    )
+    monkeypatch.setattr(library, "doubao_service", dummy_doubao_service)
+    monkeypatch.setattr(dependencies, "doubao_service", dummy_doubao_service)
 
-    with open("test_upload.png", "rb") as f:
-        response = client.post(
-            "/api/v1/library/notes/from-image",
-            headers=headers,
-            files={"file": ("test_upload.png", f, "image/png")},
-            data={"note_type": "study note", "tags": "demo,test"},
-        )
+    response = client.post(
+        "/api/v1/library/notes/from-image",
+        headers=headers,
+        files={"file": ("test_upload.png", io.BytesIO(MINIMAL_PNG), "image/png")},
+        data={"note_type": "study note", "tags": "demo,test"},
+    )
 
     assert response.status_code == 202
     payload = response.json()

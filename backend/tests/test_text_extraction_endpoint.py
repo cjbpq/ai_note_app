@@ -1,3 +1,4 @@
+import io
 import types
 import uuid
 
@@ -6,6 +7,13 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 client = TestClient(app)
+
+MINIMAL_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+    b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00"
+    b"\x00\x0cIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe\x02\xfe"
+    b"\xdc\xccY\xe7\x00\x00\x00\x00IEND\xaeB`\x82"
+)
 
 
 def _register_and_login(username: str, password: str = "pass1234") -> tuple[str, str]:
@@ -30,6 +38,7 @@ def test_extract_text_from_image(monkeypatch):
     headers = {"Authorization": f"Bearer {token}"}
 
     from app.api.v1.endpoints import library
+    from app.core import dependencies
 
     dummy_response = {
         "text": "# 标题\n- 项目一",
@@ -43,14 +52,14 @@ def test_extract_text_from_image(monkeypatch):
     )
 
     monkeypatch.setattr(library, "doubao_service", dummy_service)
+    monkeypatch.setattr(dependencies, "doubao_service", dummy_service)
 
-    with open("test_upload.png", "rb") as f:
-        response = client.post(
-            "/api/v1/library/text/from-image",
-            headers=headers,
-            files={"file": ("test_upload.png", f, "image/png")},
-            data={"output_format": "markdown"},
-        )
+    response = client.post(
+        "/api/v1/library/text/from-image",
+        headers=headers,
+        files={"file": ("test_upload.png", io.BytesIO(MINIMAL_PNG), "image/png")},
+        data={"output_format": "markdown"},
+    )
 
     assert response.status_code == 200
     payload = response.json()
