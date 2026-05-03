@@ -53,6 +53,16 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/ai_note_app"
     UPLOAD_DIR: str = "/var/www/ai_note_app/shared/uploaded_images"
 
+    # Note-aware chat/RAG configuration
+    NEXORADB_URL: Optional[str] = None
+    NEXORADB_API_KEY: Optional[str] = None
+    CHAT_RAG_TOP_K: int = 8
+    CHAT_RAG_MAX_CHUNKS: int = 6
+    CHAT_RAG_MAX_NOTES: int = 4
+    CHAT_RAG_MAX_CONTEXT_CHARS: int = 12000
+    CHAT_HISTORY_CONTEXT_MESSAGES: int = 12
+    CHAT_STREAM_HEARTBEAT_SECONDS: int = 12
+
     # Doubao configuration
     USE_DOUBAO_PIPELINE: bool = True
     DOUBAO_API_KEY: Optional[str] = Field(

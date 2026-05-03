@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, load_only
 from app.models.note import Note
 from app.models.deletion_log import DeletionLog
 from app.core.exceptions import NoteNotFoundError
+from app.services.note_index_service import try_delete_note_index, try_index_note
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,15 @@ class NoteService:
         payload.setdefault("category", "学习笔记")
         return payload
 
-    def create_note(self, note_data: Dict[str, Any], user_id: str, *, device_id: Optional[str] = None) -> Note:
+    def create_note(
+        self,
+        note_data: Dict[str, Any],
+        user_id: str,
+        *,
+        device_id: Optional[str] = None,
+        commit: bool = True,
+        index: bool = True,
+    ) -> Note:
         """创建笔记
 
         学习要点:
@@ -65,8 +74,13 @@ class NoteService:
             **normalized,
         )
         self.db.add(note)
-        self.db.commit()
+        if commit:
+            self.db.commit()
+        else:
+            self.db.flush()
         self.db.refresh(note)
+        if index:
+            try_index_note(self.db, note)
         logger.debug(f"笔记已创建: note_id={note.id}")
         return note
 
@@ -130,6 +144,7 @@ class NoteService:
 
         self.db.commit()
         self.db.refresh(note)
+        try_index_note(self.db, note)
         return note
 
     def delete_note(self, note_id: Union[str, uuid.UUID], user_id: str) -> bool:
@@ -146,6 +161,7 @@ class NoteService:
 
         normalized_id = self._normalize_id(note_id)
         logger.warning(f"笔记删除: note_id={normalized_id}, user_id={user_id}, title={note.title}")
+        try_delete_note_index(self.db, user_id=user_id, note_id=normalized_id)
 
         # 记录删除事件（供增量同步使用）
         deletion_entry = DeletionLog(
