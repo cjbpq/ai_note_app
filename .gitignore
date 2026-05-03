@@ -23,6 +23,7 @@
 **/.tox/
 
 # Local data and database byproducts
+runtime/
 **/*.db
 **/*.db.*
 **/*.sqlite

@@ -60,6 +60,7 @@ safety-report.json
 benchmarks/results/
 
 # Local AI/editor/workflow tooling
+AGENT.md
 .claude/
 .cursor/
 .codex/

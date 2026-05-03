@@ -23,3 +23,4 @@ _safe_include("app.api.v1.endpoints.library", "router", prefix="/library", tags=
 _safe_include("app.api.v1.endpoints.notes", "router", prefix="/notes", tags=["Notes"])
 _safe_include("app.api.v1.endpoints.upload", "router", prefix="/upload", tags=["Upload"])
 _safe_include("app.api.v1.endpoints.auth", "router", prefix="/auth", tags=["Auth"])
+_safe_include("app.api.v1.endpoints.chat", "router", prefix="/chat", tags=["Chat"])
