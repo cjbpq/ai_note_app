@@ -1,10 +1,5 @@
 """Add email_verification_codes table and user email_verified field.
 
-清理测试数据中的重复邮箱用户，然后：
-1. 创建 email_verification_codes 表
-2. users 表添加 email_verified 列
-3. users.email 添加唯一索引
-
 Revision ID: c3d4e5f6g7h8
 Revises: a1b2c3d4e5f6
 Create Date: 2026-03-01 18:00:00.000000
@@ -23,79 +18,44 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _duplicate_email_user_ids_sql() -> str:
+    return """
+        SELECT id
+        FROM (
+            SELECT
+                id,
+                ROW_NUMBER() OVER (
+                    PARTITION BY email
+                    ORDER BY created_at ASC, id ASC
+                ) AS duplicate_rank
+            FROM users
+            WHERE email IS NOT NULL
+        ) AS ranked_users
+        WHERE duplicate_rank > 1
+    """
+
+
 def upgrade() -> None:
     """Add email verification support."""
 
-    # ── 1. 清理重复邮箱的测试用户 ──
-    # 找到重复邮箱，保留每组中最早创建的，删除其余的
     conn = op.get_bind()
+    duplicate_user_ids = _duplicate_email_user_ids_sql()
 
-    # 先删除重复邮箱用户关联的 notes、upload_jobs、deletion_logs
-    conn.execute(sa.text("""
-        DELETE FROM notes WHERE user_id IN (
-            SELECT id FROM users
-            WHERE email IS NOT NULL
-              AND email IN (
-                  SELECT email FROM users
-                  WHERE email IS NOT NULL
-                  GROUP BY email HAVING COUNT(*) > 1
-              )
-              AND id NOT IN (
-                  SELECT DISTINCT ON (email) id FROM users
-                  WHERE email IS NOT NULL
-                  ORDER BY email, created_at ASC
-              )
+    conn.execute(
+        sa.text(
+            f"""
+            DELETE FROM upload_jobs
+            WHERE user_id IN ({duplicate_user_ids})
+               OR note_id IN (
+                    SELECT id FROM notes WHERE user_id IN ({duplicate_user_ids})
+               )
+            """
         )
-    """))
-    conn.execute(sa.text("""
-        DELETE FROM upload_jobs WHERE user_id IN (
-            SELECT id FROM users
-            WHERE email IS NOT NULL
-              AND email IN (
-                  SELECT email FROM users
-                  WHERE email IS NOT NULL
-                  GROUP BY email HAVING COUNT(*) > 1
-              )
-              AND id NOT IN (
-                  SELECT DISTINCT ON (email) id FROM users
-                  WHERE email IS NOT NULL
-                  ORDER BY email, created_at ASC
-              )
-        )
-    """))
-    conn.execute(sa.text("""
-        DELETE FROM deletion_logs WHERE user_id IN (
-            SELECT id FROM users
-            WHERE email IS NOT NULL
-              AND email IN (
-                  SELECT email FROM users
-                  WHERE email IS NOT NULL
-                  GROUP BY email HAVING COUNT(*) > 1
-              )
-              AND id NOT IN (
-                  SELECT DISTINCT ON (email) id FROM users
-                  WHERE email IS NOT NULL
-                  ORDER BY email, created_at ASC
-              )
-        )
-    """))
-    # 删除重复邮箱用户（保留最早创建的）
-    conn.execute(sa.text("""
-        DELETE FROM users
-        WHERE email IS NOT NULL
-          AND email IN (
-              SELECT email FROM users
-              WHERE email IS NOT NULL
-              GROUP BY email HAVING COUNT(*) > 1
-          )
-          AND id NOT IN (
-              SELECT DISTINCT ON (email) id FROM users
-              WHERE email IS NOT NULL
-              ORDER BY email, created_at ASC
-          )
-    """))
+    )
+    conn.execute(sa.text(f"DELETE FROM deletion_logs WHERE user_id IN ({duplicate_user_ids})"))
+    conn.execute(sa.text(f"DELETE FROM notes WHERE user_id IN ({duplicate_user_ids})"))
+    conn.execute(sa.text(f"DELETE FROM users WHERE id IN ({duplicate_user_ids})"))
 
-    # ── 2. 创建 email_verification_codes 表 ──
     op.create_table(
         "email_verification_codes",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -125,7 +85,6 @@ def upgrade() -> None:
         ["email", "purpose"],
     )
 
-    # ── 3. users 表添加 email_verified 列 ──
     op.add_column(
         "users",
         sa.Column(
@@ -136,7 +95,6 @@ def upgrade() -> None:
         ),
     )
 
-    # ── 4. users.email 添加唯一索引 ──
     op.create_index("ix_users_email_unique", "users", ["email"], unique=True)
 
 

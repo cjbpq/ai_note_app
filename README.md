@@ -46,6 +46,15 @@ Frontend:
 
 ## Backend Setup
 
+For day-to-day backend work, use a local virtual environment and a local
+PostgreSQL database. If Docker is installed, the repository includes a small
+Postgres compose file:
+
+```powershell
+cd backend
+docker compose -f docker-compose.dev.yml up -d
+```
+
 ```powershell
 cd backend
 python -m venv .venv
@@ -55,6 +64,13 @@ copy .env.example .env
 ```
 
 Edit `backend/.env` with your local settings. At minimum, set a 32+ character `SECRET_KEY`, a `DATABASE_URL`, and an `UPLOAD_DIR` outside the backend project directory.
+
+Apply database migrations before starting the API:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m alembic upgrade head
+```
 
 Run the API:
 
