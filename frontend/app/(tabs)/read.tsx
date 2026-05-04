@@ -307,6 +307,14 @@ export default function ReadScreen() {
               router.push("/search" as Href);
             }}
           />
+          {/* AI 问答入口 */}
+          <Appbar.Action
+            icon="message-processing-outline"
+            accessibilityLabel={t("chat.title")}
+            onPress={() => {
+              router.push("/chat" as Href);
+            }}
+          />
           {/* 当有筛选时：显示清除按钮 */}
           {selectedCategory && (
             <Appbar.Action

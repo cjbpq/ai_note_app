@@ -6,6 +6,7 @@
 export const ROUTES = {
   HOME: "(tabs)/index", // 示例：虽然 Expo Router 是基于文件的，但在做跳转时定义常量可以防手误
   LOGIN: "login",
+  CHAT: "/chat",
   NOTE_DETAIL: "/note", // 笔记详情页基础路径，使用时拼接 ID: `/note/${id}`
 };
 
@@ -135,6 +136,9 @@ export const ENDPOINTS = {
   },
   UPLOAD: {
     GET_JOB: "/upload/jobs",
+  },
+  CHAT: {
+    STREAM: "/chat/stream",
   },
 } as const;
 

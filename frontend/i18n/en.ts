@@ -154,6 +154,15 @@ export default {
     server: {
       unavailable: "Service is temporarily unavailable. Please try again later",
     },
+    chat: {
+      streamFailed: "AI response failed. Please try again later",
+      streamIncomplete:
+        "The AI response connection ended early. Please try again",
+      streamUnavailable:
+        "Unable to read the AI response stream. Please try again later",
+      invalidStreamResponse:
+        "Unexpected AI response format. Please ask the developer to check it",
+    },
     category: {
       fetchFailed: "Failed to load categories",
     },
@@ -375,6 +384,25 @@ export default {
     filter_badge: "{{count}}",
     summary_category_prefix: "Category:",
     clear_all_filters: "Clear all filters",
+  },
+  chat: {
+    title: "AI Chat",
+    new_chat: "New chat",
+    new_conversation: "New conversation",
+    connected: "Conversation connected",
+    streaming: "Answering",
+    thinking: "AI is thinking...",
+    input_placeholder: "Ask a question",
+    send: "Send",
+    stop: "Stop generation",
+    stopped: "Generation stopped",
+    stopped_status: "Stopped",
+    empty_title: "Start an AI chat",
+    empty_subtitle:
+      "This first version is for global chat integration without note references.",
+    empty_input: "Please enter a question before sending",
+    wait_for_response: "Please wait for the current response to finish",
+    response_failed: "This response did not finish. Please try again later.",
   },
   testApi: {
     title: "API Service Debugger",

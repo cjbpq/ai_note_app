@@ -149,6 +149,12 @@ export default {
     server: {
       unavailable: "服务暂时不可用，请稍后重试",
     },
+    chat: {
+      streamFailed: "AI 回答失败，请稍后重试",
+      streamIncomplete: "AI 回答连接提前结束，请重试",
+      streamUnavailable: "当前无法读取 AI 回答流，请稍后重试",
+      invalidStreamResponse: "AI 回答接口返回异常，请联系开发者检查",
+    },
     category: {
       fetchFailed: "获取分类列表失败",
     },
@@ -369,6 +375,24 @@ export default {
     filter_badge: "{{count}}",
     summary_category_prefix: "分类:",
     clear_all_filters: "清除全部筛选",
+  },
+  chat: {
+    title: "AI 问答",
+    new_chat: "新对话",
+    new_conversation: "新对话",
+    connected: "对话已连接",
+    streaming: "正在回答",
+    thinking: "AI 正在思考...",
+    input_placeholder: "输入你的问题",
+    send: "发送",
+    stop: "停止生成",
+    stopped: "已停止生成",
+    stopped_status: "已停止",
+    empty_title: "开始一次 AI 问答",
+    empty_subtitle: "这里先用于全局对话联调，暂不带入笔记参考。",
+    empty_input: "请输入问题后再发送",
+    wait_for_response: "请等待当前回答完成",
+    response_failed: "这次回答没有完成，请稍后重试。",
   },
   testApi: {
     title: "API Service Debugger",

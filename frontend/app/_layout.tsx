@@ -118,7 +118,10 @@ export default function RootLayout() {
     // 确保导航树已挂载且身份恢复完成
     if (!navigationState?.key || isRestoring) return;
 
-    const inAuthGroup = segments[0] === "(tabs)" || segments.length === 0;
+    const inAuthGroup =
+      segments[0] === "(tabs)" ||
+      segments[0] === "chat" ||
+      segments.length === 0;
 
     // 未登录且试图访问受保护区域 -> 跳转登录页
     if (!isAuthenticated && inAuthGroup) {
@@ -190,6 +193,14 @@ export default function RootLayout() {
           {/* 搜索页面 - 全屏 push，无底部 Tab */}
           <Stack.Screen
             name="search"
+            options={{
+              headerShown: false,
+              animation: "slide_from_right",
+            }}
+          />
+          {/* AI 对话页 - 页面内自带 Appbar */}
+          <Stack.Screen
+            name="chat"
             options={{
               headerShown: false,
               animation: "slide_from_right",
