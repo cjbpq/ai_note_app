@@ -342,6 +342,7 @@ export default {
     original_text_title: "Original Recognized Text",
     warnings_title: "AI Processing Notes",
     subject_label: "Subject",
+    ask_ai: "Ask AI",
     // Offline cache degradation
     offline_partial_cache:
       "Offline mode · Basic info only. Connect to network for full content.",
@@ -389,10 +390,12 @@ export default {
     title: "AI Chat",
     new_chat: "New chat",
     new_conversation: "New conversation",
+    note_conversation: "Note chat",
     connected: "Conversation connected",
     streaming: "Answering",
     thinking: "AI is thinking...",
     input_placeholder: "Ask a question",
+    input_note_placeholder: "Ask anything unclear about this note",
     send: "Send",
     stop: "Stop generation",
     stopped: "Generation stopped",
@@ -403,6 +406,9 @@ export default {
     empty_input: "Please enter a question before sending",
     wait_for_response: "Please wait for the current response to finish",
     response_failed: "This response did not finish. Please try again later.",
+    reference_attachment: "Attachment",
+    reference_note_fallback: "Current note",
+    reference_hint: "Ask me anything unclear about this note.",
   },
   testApi: {
     title: "API Service Debugger",

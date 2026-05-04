@@ -11,7 +11,7 @@
  * - 编辑状态通过 useNoteEditStore 管理
  * - 数据获取通过 useNotes Hook
  */
-import { Stack, useLocalSearchParams, useRouter } from "expo-router";
+import { Href, Stack, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -21,7 +21,8 @@ import {
   StyleSheet,
   View,
 } from "react-native";
-import { IconButton, Text, useTheme } from "react-native-paper";
+import { FAB, IconButton, Text, useTheme } from "react-native-paper";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ErrorScreen } from "../../components/common";
 
 // ===== 组件导入 =====
@@ -55,6 +56,7 @@ export default function NoteDetailScreen() {
   const { t } = useTranslation();
   const theme = useTheme();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { showSuccess, showError } = useToast();
 
   /**
@@ -298,6 +300,19 @@ export default function NoteDetailScreen() {
     toggleFavorite(id);
   }, [id, toggleFavorite]);
 
+  // ===== 事件处理：进入当前笔记的 AI 问答 =====
+  const handleAskAI = useCallback(() => {
+    if (!id || !note || isPartialCache) return;
+
+    router.push({
+      pathname: "/chat",
+      params: {
+        noteId: id,
+        noteTitle: note.title,
+      },
+    } as Href);
+  }, [id, isPartialCache, note, router]);
+
   // ========== 渲染状态处理 ==========
 
   // 加载中状态
@@ -506,6 +521,24 @@ export default function NoteDetailScreen() {
           </>
         )}
       </ScrollView>
+
+      {!isEditing ? (
+        <FAB
+          icon="robot-outline"
+          accessibilityLabel={t("noteDetail.ask_ai")}
+          style={[
+            styles.askAiFab,
+            {
+              right: 16,
+              bottom: Math.max(insets.bottom, 16),
+              backgroundColor: theme.colors.primaryContainer,
+            },
+          ]}
+          color={theme.colors.onPrimaryContainer}
+          disabled={isPartialCache}
+          onPress={handleAskAI}
+        />
+      ) : null}
     </>
   );
 }
@@ -516,7 +549,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   contentContainer: {
-    paddingBottom: 40,
+    paddingBottom: 112,
   },
   centerContainer: {
     flex: 1,
@@ -545,5 +578,8 @@ const styles = StyleSheet.create({
   },
   partialCacheText: {
     flex: 1,
+  },
+  askAiFab: {
+    position: "absolute",
   },
 });

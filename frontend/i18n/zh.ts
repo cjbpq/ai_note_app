@@ -333,6 +333,7 @@ export default {
     original_text_title: "原始识别文本",
     warnings_title: "AI 处理提示",
     subject_label: "学科",
+    ask_ai: "问 AI",
     // 离线缓存降级
     offline_partial_cache:
       "离线模式 · 仅显示基础信息，连接网络后可查看完整内容",
@@ -380,10 +381,12 @@ export default {
     title: "AI 问答",
     new_chat: "新对话",
     new_conversation: "新对话",
+    note_conversation: "笔记问答",
     connected: "对话已连接",
     streaming: "正在回答",
     thinking: "AI 正在思考...",
     input_placeholder: "输入你的问题",
+    input_note_placeholder: "对这篇笔记有什么不明白的，直接问我",
     send: "发送",
     stop: "停止生成",
     stopped: "已停止生成",
@@ -393,6 +396,9 @@ export default {
     empty_input: "请输入问题后再发送",
     wait_for_response: "请等待当前回答完成",
     response_failed: "这次回答没有完成，请稍后重试。",
+    reference_attachment: "附件",
+    reference_note_fallback: "当前笔记",
+    reference_hint: "对这篇笔记有什么不明白的，可以直接问我。",
   },
   testApi: {
     title: "API Service Debugger",

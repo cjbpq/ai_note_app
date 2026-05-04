@@ -12,6 +12,7 @@ import { useToast } from "./useToast";
 interface UseChatOptions {
   initialConversationId?: string | null;
   referencedNoteIds?: string[];
+  referenceNoteTitle?: string;
 }
 
 const createLocalId = (prefix: string) => {
@@ -28,13 +29,14 @@ const createFallbackError = () => {
 };
 
 export const useChat = (options: UseChatOptions = {}) => {
-  const { show, showInfo, showWarning } = useToast();
+  const { showWarning } = useToast();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(
     options.initialConversationId ?? null,
   );
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<ServiceError | null>(null);
+  const [hasReferenceAnchor, setHasReferenceAnchor] = useState(false);
   const [latestSuggestion, setLatestSuggestion] =
     useState<ChatNoteSuggestion | null>(null);
 
@@ -43,9 +45,15 @@ export const useChat = (options: UseChatOptions = {}) => {
   );
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeAssistantIdRef = useRef<string | null>(null);
+  const referencedNoteIdsRef = useRef<string[]>(options.referencedNoteIds ?? []);
+  const referenceNoteTitleRef = useRef<string | undefined>(
+    options.referenceNoteTitle,
+  );
   const isUnmountingRef = useRef(false);
   const isStreamingRef = useRef(false);
   const userStoppedRef = useRef(false);
+  const isSessionResettingRef = useRef(false);
+  const hasReferenceAnchorRef = useRef(false);
 
   useEffect(() => {
     conversationIdRef.current = conversationId;
@@ -56,8 +64,17 @@ export const useChat = (options: UseChatOptions = {}) => {
   }, [isStreaming]);
 
   useEffect(() => {
+    referencedNoteIdsRef.current = options.referencedNoteIds ?? [];
+  }, [options.referencedNoteIds]);
+
+  useEffect(() => {
+    referenceNoteTitleRef.current = options.referenceNoteTitle;
+  }, [options.referenceNoteTitle]);
+
+  useEffect(() => {
     return () => {
       isUnmountingRef.current = true;
+      isSessionResettingRef.current = true;
       abortControllerRef.current?.abort();
     };
   }, []);
@@ -87,18 +104,37 @@ export const useChat = (options: UseChatOptions = {}) => {
     [],
   );
 
-  const markAssistantFailed = useCallback((assistantId: string) => {
+  const markAssistantFailed = useCallback(
+    (assistantId: string, fallbackMessage: string) => {
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === assistantId
+            ? message.status === "stopped"
+              ? message
+              : {
+                  ...message,
+                  isStreaming: false,
+                  status: "error",
+                  content:
+                    message.content.trim().length > 0
+                      ? message.content
+                      : fallbackMessage,
+                }
+            : message,
+        ),
+      );
+    },
+    [],
+  );
+
+  const markAssistantStopped = useCallback((assistantId: string) => {
     setMessages((prev) =>
       prev.map((message) =>
         message.id === assistantId
           ? {
               ...message,
               isStreaming: false,
-              status: "error",
-              content:
-                message.content.trim().length > 0
-                  ? message.content
-                  : i18next.t("chat.response_failed"),
+              status: "stopped",
             }
           : message,
       ),
@@ -157,20 +193,16 @@ export const useChat = (options: UseChatOptions = {}) => {
     if (!abortControllerRef.current || !isStreamingRef.current) return;
 
     userStoppedRef.current = true;
+    isSessionResettingRef.current = false;
     abortControllerRef.current.abort();
     abortControllerRef.current = null;
     setIsStreaming(false);
 
     const assistantId = activeAssistantIdRef.current;
     if (assistantId) {
-      updateAssistantMessage(assistantId, {
-        isStreaming: false,
-        status: "stopped",
-      });
+      markAssistantStopped(assistantId);
     }
-
-    showInfo(i18next.t("chat.stopped"));
-  }, [showInfo, updateAssistantMessage]);
+  }, [markAssistantStopped]);
 
   const sendMessage = useCallback(
     async (rawMessage: string) => {
@@ -186,12 +218,23 @@ export const useChat = (options: UseChatOptions = {}) => {
         return false;
       }
 
+      const shouldAttachReference =
+        referencedNoteIdsRef.current.length > 0 &&
+        !hasReferenceAnchorRef.current;
+
       const now = new Date().toISOString();
       const userMessage: ChatMessage = {
         id: createLocalId("user"),
         conversationId: conversationIdRef.current ?? undefined,
         role: "user",
         content: text,
+        metadata: shouldAttachReference
+          ? {
+              referenceNoteId: referencedNoteIdsRef.current[0],
+              referenceTitle: referenceNoteTitleRef.current ?? undefined,
+              attachmentLabel: i18next.t("chat.reference_attachment"),
+            }
+          : undefined,
         createdAt: now,
         status: "done",
         isLocal: true,
@@ -209,11 +252,16 @@ export const useChat = (options: UseChatOptions = {}) => {
 
       setError(null);
       setMessages((prev) => [...prev, userMessage, assistantMessage]);
+      if (shouldAttachReference) {
+        hasReferenceAnchorRef.current = true;
+        setHasReferenceAnchor(true);
+      }
 
       const controller = new AbortController();
       abortControllerRef.current = controller;
       activeAssistantIdRef.current = assistantMessage.id;
       userStoppedRef.current = false;
+      isSessionResettingRef.current = false;
       setIsStreaming(true);
 
       try {
@@ -221,7 +269,7 @@ export const useChat = (options: UseChatOptions = {}) => {
           {
             conversation_id: conversationIdRef.current,
             message: text,
-            referenced_note_ids: options.referencedNoteIds,
+            referenced_note_ids: referencedNoteIdsRef.current,
           },
           {
             signal: controller.signal,
@@ -238,13 +286,27 @@ export const useChat = (options: UseChatOptions = {}) => {
 
         return true;
       } catch (streamError) {
-        if (isChatAbortError(streamError)) {
-          updateAssistantMessage(assistantMessage.id, {
-            isStreaming: false,
-            status: "stopped",
-          });
+        const isIntentionalInterrupt =
+          userStoppedRef.current ||
+          isUnmountingRef.current ||
+          isSessionResettingRef.current;
 
-          return userStoppedRef.current;
+        if (isIntentionalInterrupt) {
+          if (isUnmountingRef.current || isSessionResettingRef.current) {
+            return true;
+          }
+
+          markAssistantStopped(assistantMessage.id);
+          return true;
+        }
+
+        if (isChatAbortError(streamError)) {
+          markAssistantStopped(assistantMessage.id);
+          return true;
+        }
+
+        if (isUnmountingRef.current || isSessionResettingRef.current) {
+          return true;
         }
 
         const serviceError =
@@ -253,11 +315,7 @@ export const useChat = (options: UseChatOptions = {}) => {
             : createFallbackError();
 
         setError(serviceError);
-        markAssistantFailed(assistantMessage.id);
-
-        show(serviceError.message, serviceError.toastType, {
-          duration: 3000,
-        });
+        markAssistantFailed(assistantMessage.id, serviceError.message);
 
         return false;
       } finally {
@@ -271,19 +329,21 @@ export const useChat = (options: UseChatOptions = {}) => {
     [
       handleStreamEvent,
       markAssistantFailed,
-      options.referencedNoteIds,
-      show,
+      markAssistantStopped,
       showWarning,
       updateAssistantMessage,
     ],
   );
 
   const resetChat = useCallback(() => {
+    isSessionResettingRef.current = true;
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
     activeAssistantIdRef.current = null;
     conversationIdRef.current = null;
     userStoppedRef.current = false;
+    hasReferenceAnchorRef.current = false;
+    setHasReferenceAnchor(false);
     setConversationId(null);
     setMessages([]);
     setError(null);
@@ -296,6 +356,7 @@ export const useChat = (options: UseChatOptions = {}) => {
     conversationId,
     isStreaming,
     error,
+    hasReferenceAnchor,
     latestSuggestion,
     sendMessage,
     stopStreaming,
