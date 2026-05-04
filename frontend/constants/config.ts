@@ -45,6 +45,7 @@ export const APP_CONFIG = {
   VALIDATION: {
     USERNAME_MIN: 3,
     USERNAME_MAX: 10,
+    REGISTER_PASSWORD_MIN: 6,
     PASSWORD_MIN: 8,
     PASSWORD_MAX: 20,
     /** 邮箱验证码位数 */
