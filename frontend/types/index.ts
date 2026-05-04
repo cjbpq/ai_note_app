@@ -185,6 +185,13 @@ export interface ChatMessage {
   isLocal?: boolean;
 }
 
+export interface ChatReferenceNote {
+  id: string;
+  title: string;
+  imageUrl?: string;
+  category?: string;
+}
+
 export interface ChatStreamRequest {
   conversation_id?: string | null;
   message: string;

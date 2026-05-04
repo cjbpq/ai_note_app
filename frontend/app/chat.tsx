@@ -1,5 +1,5 @@
 import { Href, useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
@@ -22,46 +22,154 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 
+import { ChatReferenceChipBar } from "../components/chat/chat-reference-chip-bar";
+import { ChatReferencePickerSheet } from "../components/chat/chat-reference-picker-sheet";
 import { useChat } from "../hooks/useChat";
-import { ChatMessage } from "../types";
+import { useCategories } from "../hooks/useCategories";
+import { useNotes } from "../hooks/useNotes";
+import { useToast } from "../hooks/useToast";
+import { ChatMessage, ChatReferenceNote } from "../types";
+
+const MAX_REFERENCE_NOTES = 20;
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+};
+
+const getMessageReferences = (
+  metadata: Record<string, unknown> | undefined,
+): ChatReferenceNote[] => {
+  const rawReferences = metadata?.referenceNotes;
+
+  if (Array.isArray(rawReferences)) {
+    return rawReferences
+      .filter(isRecord)
+      .map((reference) => ({
+        id:
+          typeof reference.id === "string"
+            ? reference.id
+            : typeof reference.referenceNoteId === "string"
+              ? reference.referenceNoteId
+              : "",
+        title:
+          typeof reference.title === "string"
+            ? reference.title
+            : typeof reference.referenceTitle === "string"
+              ? reference.referenceTitle
+              : "",
+        imageUrl:
+          typeof reference.imageUrl === "string"
+            ? reference.imageUrl
+            : undefined,
+        category:
+          typeof reference.category === "string"
+            ? reference.category
+            : undefined,
+      }))
+      .filter((reference) => reference.id && reference.title);
+  }
+
+  if (
+    typeof metadata?.referenceNoteId === "string" &&
+    typeof metadata.referenceTitle === "string"
+  ) {
+    return [
+      {
+        id: metadata.referenceNoteId,
+        title: metadata.referenceTitle,
+      },
+    ];
+  }
+
+  return [];
+};
 
 export default function ChatScreen() {
   const { t } = useTranslation();
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { showWarning } = useToast();
+  const { notes, isLoading: isNotesLoading } = useNotes();
+  const { categories } = useCategories();
   const { noteId, noteTitle } = useLocalSearchParams<{
     noteId?: string;
     noteTitle?: string;
   }>();
   const listRef = useRef<FlatList<ChatMessage>>(null);
+  const hasAppliedRouteReferenceRef = useRef(false);
+  const pendingReferenceIdsRef = useRef<Set<string>>(new Set());
   const [draft, setDraft] = useState("");
+  const [activeReferences, setActiveReferences] = useState<ChatReferenceNote[]>(
+    [],
+  );
+  const [isReferencePickerVisible, setIsReferencePickerVisible] =
+    useState(false);
 
   const referenceNoteId = useMemo(() => {
     return Array.isArray(noteId) ? noteId[0] : noteId;
   }, [noteId]);
 
-  const referencedNoteIds = useMemo(() => {
-    return referenceNoteId ? [referenceNoteId] : [];
-  }, [referenceNoteId]);
+  const routeReference = useMemo<ChatReferenceNote | null>(() => {
+    if (!referenceNoteId) return null;
 
-  const referenceTitle = useMemo(() => {
-    if (!noteTitle) return t("chat.reference_note_fallback");
-    return Array.isArray(noteTitle) ? noteTitle[0] : noteTitle;
-  }, [noteTitle, t]);
+    const noteFromList = notes.find((note) => note.id === referenceNoteId);
+    const routeTitle = Array.isArray(noteTitle) ? noteTitle[0] : noteTitle;
+
+    return {
+      id: referenceNoteId,
+      title:
+        noteFromList?.title ?? routeTitle ?? t("chat.reference_note_fallback"),
+      imageUrl: noteFromList?.imageUrls?.[0],
+      category: noteFromList?.category,
+    };
+  }, [noteTitle, notes, referenceNoteId, t]);
 
   const {
     messages,
     conversationId,
     isStreaming,
-    hasReferenceAnchor,
     sendMessage,
     stopStreaming,
     resetChat,
-  } = useChat({ referencedNoteIds, referenceNoteTitle: referenceTitle });
+  } = useChat();
 
   const canSend = draft.trim().length > 0 && !isStreaming;
-  const shouldShowComposerReference = !!referenceNoteId && !hasReferenceAnchor;
+  const isReferenceLimitReached =
+    activeReferences.length >= MAX_REFERENCE_NOTES;
+  const composerBottomPadding =
+    Platform.OS === "ios"
+      ? Math.max(insets.bottom, 12)
+      : Math.max(insets.bottom, 32);
+
+  useEffect(() => {
+    if (!routeReference || hasAppliedRouteReferenceRef.current) return;
+
+    hasAppliedRouteReferenceRef.current = true;
+    pendingReferenceIdsRef.current.add(routeReference.id);
+    setActiveReferences((prev) =>
+      prev.some((reference) => reference.id === routeReference.id)
+        ? prev
+        : [routeReference, ...prev],
+    );
+  }, [routeReference]);
+
+  useEffect(() => {
+    if (!routeReference || !hasAppliedRouteReferenceRef.current) return;
+
+    setActiveReferences((prev) =>
+      prev.map((reference) =>
+        reference.id === routeReference.id
+          ? {
+              ...reference,
+              title: routeReference.title,
+              imageUrl: routeReference.imageUrl,
+              category: routeReference.category,
+            }
+          : reference,
+      ),
+    );
+  }, [routeReference]);
 
   const handleBack = useCallback(() => {
     if (router.canGoBack()) {
@@ -78,16 +186,62 @@ export default function ChatScreen() {
     }
 
     const message = draft;
+    const referencedNotes = activeReferences;
+    const displayReferencedNotes = activeReferences.filter((reference) =>
+      pendingReferenceIdsRef.current.has(reference.id),
+    );
     setDraft("");
-    void sendMessage(message);
-  }, [draft, isStreaming, sendMessage]);
+    pendingReferenceIdsRef.current.clear();
+    void sendMessage(message, { referencedNotes, displayReferencedNotes });
+  }, [activeReferences, draft, isStreaming, sendMessage]);
+
+  const handleResetChat = useCallback(() => {
+    resetChat();
+    setDraft("");
+    pendingReferenceIdsRef.current = new Set(
+      routeReference ? [routeReference.id] : [],
+    );
+    setActiveReferences(routeReference ? [routeReference] : []);
+  }, [resetChat, routeReference]);
+
+  const handleOpenReferencePicker = useCallback(() => {
+    if (isStreaming) return;
+    setIsReferencePickerVisible(true);
+  }, [isStreaming]);
+
+  const handleSelectReference = useCallback(
+    (note: ChatReferenceNote) => {
+      setActiveReferences((prev) => {
+        if (prev.some((reference) => reference.id === note.id)) return prev;
+        if (prev.length >= MAX_REFERENCE_NOTES) {
+          showWarning(
+            t("chat.reference_limit_reached", { count: MAX_REFERENCE_NOTES }),
+          );
+          return prev;
+        }
+        pendingReferenceIdsRef.current.add(note.id);
+        return [...prev, note];
+      });
+      setIsReferencePickerVisible(false);
+    },
+    [showWarning, t],
+  );
+
+  const handleRemoveReference = useCallback((id: string) => {
+    pendingReferenceIdsRef.current.delete(id);
+    setActiveReferences((prev) =>
+      prev.filter((reference) => reference.id !== id),
+    );
+  }, []);
 
   const subtitle = useMemo(() => {
     if (isStreaming) return t("chat.streaming");
     if (conversationId) return t("chat.connected");
-    if (referenceNoteId) return t("chat.note_conversation");
+    if (activeReferences.length > 0) {
+      return t("chat.references_ready", { count: activeReferences.length });
+    }
     return t("chat.new_conversation");
-  }, [conversationId, isStreaming, referenceNoteId, t]);
+  }, [activeReferences.length, conversationId, isStreaming, t]);
 
   const scrollToEnd = useCallback(() => {
     requestAnimationFrame(() => {
@@ -102,10 +256,7 @@ export default function ChatScreen() {
       const isStopped = item.status === "stopped";
       const isEmptyStreaming =
         item.role === "assistant" && item.isStreaming && !item.content;
-      const referenceTitle =
-        typeof item.metadata?.referenceTitle === "string"
-          ? item.metadata.referenceTitle
-          : undefined;
+      const messageReferences = getMessageReferences(item.metadata);
 
       return (
         <View
@@ -128,29 +279,9 @@ export default function ChatScreen() {
               },
             ]}
           >
-            {isUser && referenceTitle ? (
-              <View
-                style={[
-                  styles.messageAttachment,
-                  { borderColor: theme.colors.outlineVariant },
-                ]}
-              >
-                <IconButton
-                  icon="paperclip"
-                  size={14}
-                  iconColor={theme.colors.onPrimaryContainer}
-                  style={styles.messageAttachmentIcon}
-                />
-                <Text
-                  variant="labelSmall"
-                  numberOfLines={1}
-                  style={[
-                    styles.messageAttachmentText,
-                    { color: theme.colors.onPrimaryContainer },
-                  ]}
-                >
-                  {referenceTitle}
-                </Text>
+            {isUser && messageReferences.length > 0 ? (
+              <View style={styles.messageAttachmentBar}>
+                <ChatReferenceChipBar references={messageReferences} />
               </View>
             ) : null}
             {isEmptyStreaming ? (
@@ -198,7 +329,6 @@ export default function ChatScreen() {
       theme.colors.onErrorContainer,
       theme.colors.onPrimaryContainer,
       theme.colors.onSurfaceVariant,
-      theme.colors.outlineVariant,
       theme.colors.primary,
       theme.colors.primaryContainer,
       theme.colors.surfaceVariant,
@@ -218,7 +348,7 @@ export default function ChatScreen() {
             icon="plus"
             accessibilityLabel={t("chat.new_chat")}
             disabled={isStreaming}
-            onPress={resetChat}
+            onPress={handleResetChat}
           />
         ) : null}
       </Appbar.Header>
@@ -238,25 +368,23 @@ export default function ChatScreen() {
           ]}
           ListEmptyComponent={
             <View style={styles.emptyState}>
-              {!referenceNoteId ? (
-                <>
-                  <Text
-                    variant="titleMedium"
-                    style={{ color: theme.colors.onSurface }}
-                  >
-                    {t("chat.empty_title")}
-                  </Text>
-                  <Text
-                    variant="bodyMedium"
-                    style={[
-                      styles.emptyText,
-                      { color: theme.colors.onSurfaceVariant },
-                    ]}
-                  >
-                    {t("chat.empty_subtitle")}
-                  </Text>
-                </>
-              ) : null}
+              <Text
+                variant="titleMedium"
+                style={{ color: theme.colors.onSurface }}
+              >
+                {t("chat.empty_title")}
+              </Text>
+              <Text
+                variant="bodyMedium"
+                style={[
+                  styles.emptyText,
+                  { color: theme.colors.onSurfaceVariant },
+                ]}
+              >
+                {activeReferences.length > 0
+                  ? t("chat.empty_with_reference")
+                  : t("chat.empty_subtitle")}
+              </Text>
             </View>
           }
           keyboardShouldPersistTaps="handled"
@@ -270,54 +398,36 @@ export default function ChatScreen() {
             {
               borderTopColor: theme.colors.outlineVariant,
               backgroundColor: theme.colors.surface,
-              paddingBottom:
-                Platform.OS === "ios" ? Math.max(insets.bottom, 12) : 12,
+              paddingBottom: composerBottomPadding,
             },
           ]}
         >
-          {shouldShowComposerReference ? (
-            <View style={styles.composerAttachmentRow}>
-              <Surface
-                elevation={0}
-                style={[
-                  styles.composerAttachment,
-                  {
-                    backgroundColor: theme.colors.surfaceVariant,
-                    borderColor: theme.colors.outlineVariant,
-                  },
-                ]}
-              >
-                <IconButton
-                  icon="paperclip"
-                  size={14}
-                  iconColor={theme.colors.primary}
-                  style={styles.composerAttachmentIcon}
-                />
-                <Text
-                  variant="labelSmall"
-                  numberOfLines={1}
-                  style={[
-                    styles.composerAttachmentText,
-                    { color: theme.colors.onSurfaceVariant },
-                  ]}
-                >
-                  {t("chat.reference_attachment")} · {referenceTitle}
-                </Text>
-              </Surface>
+          {activeReferences.length > 0 ? (
+            <View style={styles.composerReferenceRow}>
+              <ChatReferenceChipBar
+                references={activeReferences}
+                disabled={isStreaming}
+                onRemove={handleRemoveReference}
+              />
             </View>
           ) : null}
 
           <View style={styles.composerInputRow}>
+            <IconButton
+              mode="contained-tonal"
+              icon="note-plus-outline"
+              size={20}
+              accessibilityLabel={t("chat.add_reference")}
+              disabled={isStreaming}
+              onPress={handleOpenReferencePicker}
+              style={styles.addReferenceButton}
+            />
             <TextInput
               mode="outlined"
               dense
               value={draft}
               onChangeText={setDraft}
-              placeholder={
-                shouldShowComposerReference
-                  ? t("chat.input_note_placeholder")
-                  : t("chat.input_placeholder")
-              }
+              placeholder={t("chat.input_placeholder")}
               placeholderTextColor={theme.colors.outline}
               multiline
               numberOfLines={1}
@@ -350,6 +460,19 @@ export default function ChatScreen() {
           </View>
         </View>
       </KeyboardAvoidingView>
+
+      <ChatReferencePickerSheet
+        visible={isReferencePickerVisible}
+        notes={notes}
+        categories={categories}
+        activeReferences={activeReferences}
+        selectedIds={activeReferences.map((reference) => reference.id)}
+        isLoading={isNotesLoading}
+        isLimitReached={isReferenceLimitReached}
+        onRemoveReference={handleRemoveReference}
+        onSelect={handleSelectReference}
+        onDismiss={() => setIsReferencePickerVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -403,55 +526,25 @@ const styles = StyleSheet.create({
   statusText: {
     marginTop: 6,
   },
-  messageAttachment: {
-    alignSelf: "flex-start",
-    flexDirection: "row",
-    alignItems: "center",
-    maxWidth: "100%",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 6,
+  messageAttachmentBar: {
     marginBottom: 8,
-    paddingRight: 8,
-  },
-  messageAttachmentIcon: {
-    width: 22,
-    height: 22,
-    margin: 0,
-  },
-  messageAttachmentText: {
-    flexShrink: 1,
+    maxWidth: "100%",
   },
   composer: {
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 12,
-    paddingTop: 6,
+    paddingTop: 8,
   },
-  composerAttachmentRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 6,
-  },
-  composerAttachment: {
-    flexDirection: "row",
-    alignItems: "center",
-    maxWidth: "86%",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 8,
-    paddingRight: 8,
-  },
-  composerAttachmentIcon: {
-    width: 24,
-    height: 24,
-    margin: 0,
-    marginRight: 2,
-  },
-  composerAttachmentText: {
-    flexShrink: 1,
+  composerReferenceRow: {
+    marginBottom: 8,
   },
   composerInputRow: {
     flexDirection: "row",
     alignItems: "flex-end",
     gap: 8,
+  },
+  addReferenceButton: {
+    margin: 0,
   },
   input: {
     flex: 1,
