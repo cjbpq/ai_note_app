@@ -162,6 +162,9 @@ export default {
         "Unable to read the AI response stream. Please try again later",
       invalidStreamResponse:
         "Unexpected AI response format. Please ask the developer to check it",
+      conversationListFailed: "Failed to load chat history",
+      conversationLoadFailed: "Failed to load this conversation",
+      conversationDeleteFailed: "Failed to delete conversation",
     },
     category: {
       fetchFailed: "Failed to load categories",
@@ -419,8 +422,21 @@ export default {
     reference_limit_reached: "Up to {{count}} reference notes can be added",
     current_references: "Current reference notes",
     current_references_hint:
-      "These notes stay active until you remove them, and each new message will send them to the backend.",
+      "These notes stay active for this conversation and cannot be removed here after being added.",
     current_references_empty: "No active reference notes yet",
+    open_history: "Open chat history",
+    session_deleted: "Conversation deleted",
+    sessions_deleted: "Conversations deleted",
+    session_today: "Today",
+    session_this_week: "This week",
+    session_this_month: "This month",
+    session_earlier: "Earlier",
+    session_new_question: "New question",
+    session_history: "History",
+    session_delete_mode: "Delete conversations",
+    session_selected: "{{count}} selected",
+    session_empty: "No chat history yet",
+    session_untitled: "Untitled conversation",
   },
   testApi: {
     title: "API Service Debugger",

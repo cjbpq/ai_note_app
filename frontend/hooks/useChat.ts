@@ -2,9 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import i18next from "../i18n";
 import { chatService, isChatAbortError } from "../services/chatService";
 import {
+  ChatConversationDetailResponse,
   ChatMessage,
   ChatNoteSuggestion,
   ChatReferenceNote,
+  ChatMessageResponse,
   ChatStreamEvent,
   ServiceError,
 } from "../types";
@@ -30,6 +32,21 @@ const createFallbackError = () => {
     toastType: "error",
     retryable: true,
   });
+};
+
+const normalizeStoredMessage = (message: ChatMessageResponse): ChatMessage => {
+  return {
+    id: message.id,
+    serverId: message.id,
+    conversationId: message.conversation_id,
+    role: message.role,
+    content: message.content,
+    sequence: message.sequence,
+    metadata: message.metadata,
+    createdAt: message.created_at,
+    status: "done",
+    isLocal: false,
+  };
 };
 
 export const useChat = (options: UseChatOptions = {}) => {
@@ -220,17 +237,20 @@ export const useChat = (options: UseChatOptions = {}) => {
         conversationId: conversationIdRef.current ?? undefined,
         role: "user",
         content: text,
-        metadata: displayReferencedNotes.length > 0
-          ? {
-              referenceNotes: displayReferencedNotes.map((note) => ({
-                id: note.id,
-                title: note.title,
-                imageUrl: note.imageUrl,
-                category: note.category,
-              })),
-              attachmentLabel: i18next.t("chat.reference_attachment"),
-            }
-          : undefined,
+        metadata: {
+          referenced_note_ids: referencedNoteIds,
+          ...(displayReferencedNotes.length > 0
+            ? {
+                referenceNotes: displayReferencedNotes.map((note) => ({
+                  id: note.id,
+                  title: note.title,
+                  imageUrl: note.imageUrl,
+                  category: note.category,
+                })),
+                attachmentLabel: i18next.t("chat.reference_attachment"),
+              }
+            : {}),
+        },
         createdAt: now,
         status: "done",
         isLocal: true,
@@ -341,6 +361,31 @@ export const useChat = (options: UseChatOptions = {}) => {
     setIsStreaming(false);
   }, []);
 
+  const restoreConversation = useCallback(
+    (detail: ChatConversationDetailResponse) => {
+      isSessionResettingRef.current = true;
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+      activeAssistantIdRef.current = null;
+      userStoppedRef.current = false;
+
+      const nextConversationId = detail.conversation.id;
+      conversationIdRef.current = nextConversationId;
+      setConversationId(nextConversationId);
+      setMessages(
+        detail.messages
+          .slice()
+          .sort((a, b) => a.sequence - b.sequence)
+          .map(normalizeStoredMessage),
+      );
+      setError(null);
+      setLatestSuggestion(null);
+      setIsStreaming(false);
+      isSessionResettingRef.current = false;
+    },
+    [],
+  );
+
   return {
     messages,
     conversationId,
@@ -350,5 +395,6 @@ export const useChat = (options: UseChatOptions = {}) => {
     sendMessage,
     stopStreaming,
     resetChat,
+    restoreConversation,
   };
 };

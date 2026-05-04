@@ -185,6 +185,49 @@ export interface ChatMessage {
   isLocal?: boolean;
 }
 
+export interface ChatConversation {
+  id: string;
+  title: string;
+  parent_conversation_id?: string | null;
+  forked_from_message_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatMessageResponse {
+  id: string;
+  conversation_id: string;
+  role: ChatRole;
+  content: string;
+  sequence: number;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ChatConversationListResponse {
+  conversations: ChatConversation[];
+  total: number;
+}
+
+export interface ChatConversationSearchResponse {
+  conversations: ChatConversation[];
+  total: number;
+}
+
+export interface ChatConversationDetailResponse {
+  conversation: ChatConversation;
+  messages: ChatMessageResponse[];
+}
+
+export interface ChatConversationBatchDeleteRequest {
+  conversation_ids: string[];
+}
+
+export interface ChatConversationBatchDeleteResponse {
+  deleted_count: number;
+  not_found_ids: string[];
+}
+
 export interface ChatReferenceNote {
   id: string;
   title: string;

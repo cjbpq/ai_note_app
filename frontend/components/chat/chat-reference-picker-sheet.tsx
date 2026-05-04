@@ -30,11 +30,10 @@ interface ChatReferencePickerSheetProps {
   visible: boolean;
   notes: Note[];
   categories: NoteCategory[];
-  activeReferences: ChatReferenceNote[];
+  currentReferences: ChatReferenceNote[];
   selectedIds: string[];
   isLoading?: boolean;
   isLimitReached?: boolean;
-  onRemoveReference: (id: string) => void;
   onSelect: (note: ChatReferenceNote) => void;
   onDismiss: () => void;
 }
@@ -43,11 +42,10 @@ export const ChatReferencePickerSheet = ({
   visible,
   notes,
   categories,
-  activeReferences,
+  currentReferences,
   selectedIds,
   isLoading = false,
   isLimitReached = false,
-  onRemoveReference,
   onSelect,
   onDismiss,
 }: ChatReferencePickerSheetProps) => {
@@ -158,7 +156,7 @@ export const ChatReferencePickerSheet = ({
                   variant="labelSmall"
                   style={{ color: theme.colors.onSurfaceVariant }}
                 >
-                  {activeReferences.length} / 20
+                  {currentReferences.length} / 20
                 </Text>
               </View>
               <Text
@@ -170,11 +168,8 @@ export const ChatReferencePickerSheet = ({
               >
                 {t("chat.current_references_hint")}
               </Text>
-              {activeReferences.length > 0 ? (
-                <ChatReferenceChipBar
-                  references={activeReferences}
-                  onRemove={onRemoveReference}
-                />
+              {currentReferences.length > 0 ? (
+                <ChatReferenceChipBar references={currentReferences} />
               ) : (
                 <Text
                   variant="bodySmall"

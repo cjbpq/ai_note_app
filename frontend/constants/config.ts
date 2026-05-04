@@ -139,6 +139,10 @@ export const ENDPOINTS = {
   },
   CHAT: {
     STREAM: "/chat/stream",
+    CONVERSATIONS: "/chat/conversations",
+    CONVERSATION_DETAIL: (id: string) => `/chat/conversations/${id}`,
+    BATCH_DELETE_CONVERSATIONS: "/chat/conversations/batch-delete",
+    SEARCH_CONVERSATIONS: "/chat/conversations/search",
   },
 } as const;
 

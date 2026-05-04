@@ -4,6 +4,9 @@ import i18next from "../i18n";
 import { useNetworkStore } from "../store/useNetworkStore";
 import {
   ChatDeltaPayload,
+  ChatConversationBatchDeleteResponse,
+  ChatConversationDetailResponse,
+  ChatConversationListResponse,
   ChatDonePayload,
   ChatErrorPayload,
   ChatNoteSuggestion,
@@ -12,8 +15,10 @@ import {
   ServiceError,
   ToastType,
 } from "../types";
+import api from "./api";
 import { authEventEmitter } from "./api";
 import { authService } from "./authService";
+import { parseServiceError } from "./errorService";
 import { tokenService } from "./tokenService";
 
 interface StreamChatOptions {
@@ -314,6 +319,82 @@ const createStreamEventError = (payload: ChatErrorPayload): ServiceError => {
 };
 
 export const chatService = {
+  listConversations: async (
+    params: { skip?: number; limit?: number } = {},
+  ): Promise<ChatConversationListResponse> => {
+    try {
+      const response = await api.get<ChatConversationListResponse>(
+        ENDPOINTS.CHAT.CONVERSATIONS,
+        {
+          params: {
+            skip: params.skip ?? 0,
+            limit: params.limit ?? 50,
+          },
+        },
+      );
+      return response as unknown as ChatConversationListResponse;
+    } catch (error) {
+      throw parseServiceError(error, {
+        fallbackKey: "error.chat.conversationListFailed",
+        statusMap: {
+          422: { key: "error.validation.invalid", toastType: "warning" },
+        },
+      });
+    }
+  },
+
+  getConversationDetail: async (
+    conversationId: string,
+  ): Promise<ChatConversationDetailResponse> => {
+    try {
+      const response = await api.get<ChatConversationDetailResponse>(
+        ENDPOINTS.CHAT.CONVERSATION_DETAIL(conversationId),
+      );
+      return response as unknown as ChatConversationDetailResponse;
+    } catch (error) {
+      throw parseServiceError(error, {
+        fallbackKey: "error.chat.conversationLoadFailed",
+        statusMap: {
+          404: { key: "error.common.notFound", toastType: "error" },
+          422: { key: "error.validation.invalid", toastType: "warning" },
+        },
+      });
+    }
+  },
+
+  deleteConversation: async (conversationId: string): Promise<void> => {
+    try {
+      await api.delete(ENDPOINTS.CHAT.CONVERSATION_DETAIL(conversationId));
+    } catch (error) {
+      throw parseServiceError(error, {
+        fallbackKey: "error.chat.conversationDeleteFailed",
+        statusMap: {
+          404: { key: "error.common.notFound", toastType: "error" },
+          422: { key: "error.validation.invalid", toastType: "warning" },
+        },
+      });
+    }
+  },
+
+  batchDeleteConversations: async (
+    conversationIds: string[],
+  ): Promise<ChatConversationBatchDeleteResponse> => {
+    try {
+      const response = await api.post<ChatConversationBatchDeleteResponse>(
+        ENDPOINTS.CHAT.BATCH_DELETE_CONVERSATIONS,
+        { conversation_ids: conversationIds },
+      );
+      return response as unknown as ChatConversationBatchDeleteResponse;
+    } catch (error) {
+      throw parseServiceError(error, {
+        fallbackKey: "error.chat.conversationDeleteFailed",
+        statusMap: {
+          422: { key: "error.validation.invalid", toastType: "warning" },
+        },
+      });
+    }
+  },
+
   streamChat: async (
     request: ChatStreamRequest,
     options: StreamChatOptions = {},

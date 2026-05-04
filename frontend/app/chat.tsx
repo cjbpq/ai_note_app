@@ -24,11 +24,17 @@ import {
 
 import { ChatReferenceChipBar } from "../components/chat/chat-reference-chip-bar";
 import { ChatReferencePickerSheet } from "../components/chat/chat-reference-picker-sheet";
+import { ChatSessionDrawer } from "../components/chat/chat-session-drawer";
 import { useChat } from "../hooks/useChat";
+import { useChatConversations } from "../hooks/useChatConversations";
 import { useCategories } from "../hooks/useCategories";
 import { useNotes } from "../hooks/useNotes";
 import { useToast } from "../hooks/useToast";
-import { ChatMessage, ChatReferenceNote } from "../types";
+import {
+  ChatConversationDetailResponse,
+  ChatMessage,
+  ChatReferenceNote,
+} from "../types";
 
 const MAX_REFERENCE_NOTES = 20;
 
@@ -84,6 +90,26 @@ const getMessageReferences = (
   return [];
 };
 
+const getReferencedNoteIds = (
+  metadata: Record<string, unknown> | undefined,
+): string[] => {
+  const rawIds = metadata?.referenced_note_ids;
+  if (!Array.isArray(rawIds)) return [];
+  return rawIds.filter((id): id is string => typeof id === "string" && !!id);
+};
+
+const mergeReferences = (
+  ...groups: ChatReferenceNote[][]
+): ChatReferenceNote[] => {
+  const references = new Map<string, ChatReferenceNote>();
+  groups.flat().forEach((reference) => {
+    if (!references.has(reference.id)) {
+      references.set(reference.id, reference);
+    }
+  });
+  return Array.from(references.values());
+};
+
 export default function ChatScreen() {
   const { t } = useTranslation();
   const theme = useTheme();
@@ -98,13 +124,16 @@ export default function ChatScreen() {
   }>();
   const listRef = useRef<FlatList<ChatMessage>>(null);
   const hasAppliedRouteReferenceRef = useRef(false);
-  const pendingReferenceIdsRef = useRef<Set<string>>(new Set());
   const [draft, setDraft] = useState("");
-  const [activeReferences, setActiveReferences] = useState<ChatReferenceNote[]>(
+  const [sessionReferences, setSessionReferences] = useState<
+    ChatReferenceNote[]
+  >([]);
+  const [draftReferences, setDraftReferences] = useState<ChatReferenceNote[]>(
     [],
   );
   const [isReferencePickerVisible, setIsReferencePickerVisible] =
     useState(false);
+  const [isSessionDrawerVisible, setIsSessionDrawerVisible] = useState(false);
 
   const referenceNoteId = useMemo(() => {
     return Array.isArray(noteId) ? noteId[0] : noteId;
@@ -125,6 +154,22 @@ export default function ChatScreen() {
     };
   }, [noteTitle, notes, referenceNoteId, t]);
 
+  const referenceMap = useMemo(() => {
+    const map = new Map<string, ChatReferenceNote>();
+    notes.forEach((note) => {
+      map.set(note.id, {
+        id: note.id,
+        title: note.title,
+        imageUrl: note.imageUrls?.[0],
+        category: note.category,
+      });
+    });
+    if (routeReference) {
+      map.set(routeReference.id, routeReference);
+    }
+    return map;
+  }, [notes, routeReference]);
+
   const {
     messages,
     conversationId,
@@ -132,22 +177,92 @@ export default function ChatScreen() {
     sendMessage,
     stopStreaming,
     resetChat,
+    restoreConversation,
   } = useChat();
+  const {
+    conversations,
+    isLoading: isConversationsLoading,
+    isRefreshing: isConversationsRefreshing,
+    loadConversation,
+    isLoadingConversation,
+    batchDeleteConversations,
+    isBatchDeleting,
+    invalidateConversations,
+  } = useChatConversations();
 
   const canSend = draft.trim().length > 0 && !isStreaming;
+  const selectedReferences = useMemo(
+    () => mergeReferences(sessionReferences, draftReferences),
+    [draftReferences, sessionReferences],
+  );
   const isReferenceLimitReached =
-    activeReferences.length >= MAX_REFERENCE_NOTES;
+    selectedReferences.length >= MAX_REFERENCE_NOTES;
   const composerBottomPadding =
     Platform.OS === "ios"
       ? Math.max(insets.bottom, 12)
       : Math.max(insets.bottom, 32);
 
+  const createReferenceFromId = useCallback(
+    (id: string): ChatReferenceNote => {
+      return (
+        referenceMap.get(id) ?? {
+          id,
+          title: t("chat.reference_note_fallback"),
+        }
+      );
+    },
+    [referenceMap, t],
+  );
+
+  const hydrateConversationReferences = useCallback(
+    (detail: ChatConversationDetailResponse) => {
+      const knownIds = new Set<string>();
+      const restoredReferences: ChatReferenceNote[] = [];
+
+      const messages = detail.messages
+        .slice()
+        .sort((a, b) => a.sequence - b.sequence)
+        .map((message) => {
+          if (message.role !== "user") return message;
+
+          const requestReferenceIds = getReferencedNoteIds(message.metadata);
+          const newReferenceIds = requestReferenceIds.filter(
+            (id) => !knownIds.has(id),
+          );
+
+          requestReferenceIds.forEach((id) => {
+            if (!knownIds.has(id)) {
+              knownIds.add(id);
+              restoredReferences.push(createReferenceFromId(id));
+            }
+          });
+
+          return {
+            ...message,
+            metadata: {
+              ...(message.metadata ?? {}),
+              referenced_note_ids: requestReferenceIds,
+              referenceNotes: newReferenceIds.map(createReferenceFromId),
+            },
+          };
+        });
+
+      return {
+        detail: {
+          ...detail,
+          messages,
+        },
+        sessionReferences: restoredReferences,
+      };
+    },
+    [createReferenceFromId],
+  );
+
   useEffect(() => {
     if (!routeReference || hasAppliedRouteReferenceRef.current) return;
 
     hasAppliedRouteReferenceRef.current = true;
-    pendingReferenceIdsRef.current.add(routeReference.id);
-    setActiveReferences((prev) =>
+    setDraftReferences((prev) =>
       prev.some((reference) => reference.id === routeReference.id)
         ? prev
         : [routeReference, ...prev],
@@ -157,7 +272,19 @@ export default function ChatScreen() {
   useEffect(() => {
     if (!routeReference || !hasAppliedRouteReferenceRef.current) return;
 
-    setActiveReferences((prev) =>
+    setSessionReferences((prev) =>
+      prev.map((reference) =>
+        reference.id === routeReference.id
+          ? {
+              ...reference,
+              title: routeReference.title,
+              imageUrl: routeReference.imageUrl,
+              category: routeReference.category,
+            }
+          : reference,
+      ),
+    );
+    setDraftReferences((prev) =>
       prev.map((reference) =>
         reference.id === routeReference.id
           ? {
@@ -186,23 +313,88 @@ export default function ChatScreen() {
     }
 
     const message = draft;
-    const referencedNotes = activeReferences;
-    const displayReferencedNotes = activeReferences.filter((reference) =>
-      pendingReferenceIdsRef.current.has(reference.id),
+    const referencedNotes = mergeReferences(
+      sessionReferences,
+      draftReferences,
     );
+    const displayReferencedNotes = draftReferences;
     setDraft("");
-    pendingReferenceIdsRef.current.clear();
-    void sendMessage(message, { referencedNotes, displayReferencedNotes });
-  }, [activeReferences, draft, isStreaming, sendMessage]);
+    setSessionReferences(referencedNotes.slice(0, MAX_REFERENCE_NOTES));
+    setDraftReferences([]);
+    void sendMessage(message, { referencedNotes, displayReferencedNotes }).then(
+      (success) => {
+        if (success) {
+          void invalidateConversations();
+        }
+      },
+    );
+  }, [
+    draft,
+    draftReferences,
+    invalidateConversations,
+    isStreaming,
+    sessionReferences,
+    sendMessage,
+  ]);
 
   const handleResetChat = useCallback(() => {
     resetChat();
     setDraft("");
-    pendingReferenceIdsRef.current = new Set(
-      routeReference ? [routeReference.id] : [],
-    );
-    setActiveReferences(routeReference ? [routeReference] : []);
+    setSessionReferences([]);
+    setDraftReferences(routeReference ? [routeReference] : []);
+    setIsSessionDrawerVisible(false);
   }, [resetChat, routeReference]);
+
+  const handleOpenSessionDrawer = useCallback(() => {
+    setIsSessionDrawerVisible(true);
+    void invalidateConversations();
+  }, [invalidateConversations]);
+
+  const handleSelectConversation = useCallback(
+    async (selectedConversationId: string) => {
+      if (isStreaming || isLoadingConversation) return;
+      if (selectedConversationId === conversationId) {
+        setIsSessionDrawerVisible(false);
+        return;
+      }
+
+      try {
+        const detail = await loadConversation(selectedConversationId);
+        const hydrated = hydrateConversationReferences(detail);
+        restoreConversation(hydrated.detail);
+        setDraft("");
+        setSessionReferences(hydrated.sessionReferences);
+        setDraftReferences([]);
+        setIsReferencePickerVisible(false);
+        setIsSessionDrawerVisible(false);
+      } catch {
+        // Error toast is handled inside the mutation hook.
+      }
+    },
+    [
+      conversationId,
+      hydrateConversationReferences,
+      isLoadingConversation,
+      isStreaming,
+      loadConversation,
+      restoreConversation,
+    ],
+  );
+
+  const handleDeleteConversations = useCallback(
+    async (conversationIds: string[]) => {
+      if (conversationIds.length === 0) return;
+      try {
+        await batchDeleteConversations(conversationIds);
+        if (conversationId && conversationIds.includes(conversationId)) {
+          handleResetChat();
+        }
+      } catch {
+        // Error toast is handled inside the mutation hook.
+      }
+    },
+    [batchDeleteConversations, conversationId, handleResetChat],
+  );
 
   const handleOpenReferencePicker = useCallback(() => {
     if (isStreaming) return;
@@ -211,37 +403,36 @@ export default function ChatScreen() {
 
   const handleSelectReference = useCallback(
     (note: ChatReferenceNote) => {
-      setActiveReferences((prev) => {
-        if (prev.some((reference) => reference.id === note.id)) return prev;
-        if (prev.length >= MAX_REFERENCE_NOTES) {
+      setDraftReferences((prev) => {
+        const selected = mergeReferences(sessionReferences, prev);
+        if (selected.some((reference) => reference.id === note.id)) {
+          return prev;
+        }
+        if (selected.length >= MAX_REFERENCE_NOTES) {
           showWarning(
             t("chat.reference_limit_reached", { count: MAX_REFERENCE_NOTES }),
           );
           return prev;
         }
-        pendingReferenceIdsRef.current.add(note.id);
         return [...prev, note];
       });
       setIsReferencePickerVisible(false);
     },
-    [showWarning, t],
+    [sessionReferences, showWarning, t],
   );
 
   const handleRemoveReference = useCallback((id: string) => {
-    pendingReferenceIdsRef.current.delete(id);
-    setActiveReferences((prev) =>
-      prev.filter((reference) => reference.id !== id),
-    );
+    setDraftReferences((prev) => prev.filter((reference) => reference.id !== id));
   }, []);
 
   const subtitle = useMemo(() => {
     if (isStreaming) return t("chat.streaming");
     if (conversationId) return t("chat.connected");
-    if (activeReferences.length > 0) {
-      return t("chat.references_ready", { count: activeReferences.length });
+    if (selectedReferences.length > 0) {
+      return t("chat.references_ready", { count: selectedReferences.length });
     }
     return t("chat.new_conversation");
-  }, [activeReferences.length, conversationId, isStreaming, t]);
+  }, [conversationId, isStreaming, selectedReferences.length, t]);
 
   const scrollToEnd = useCallback(() => {
     requestAnimationFrame(() => {
@@ -343,14 +534,17 @@ export default function ChatScreen() {
       <Appbar.Header statusBarHeight={insets.top}>
         <Appbar.BackAction onPress={handleBack} />
         <Appbar.Content title={t("chat.title")} subtitle={subtitle} />
-        {messages.length > 0 ? (
-          <Appbar.Action
-            icon="plus"
-            accessibilityLabel={t("chat.new_chat")}
-            disabled={isStreaming}
-            onPress={handleResetChat}
-          />
-        ) : null}
+        <Appbar.Action
+          icon="plus"
+          accessibilityLabel={t("chat.new_chat")}
+          disabled={isStreaming}
+          onPress={handleResetChat}
+        />
+        <Appbar.Action
+          icon="history"
+          accessibilityLabel={t("chat.open_history")}
+          onPress={handleOpenSessionDrawer}
+        />
       </Appbar.Header>
 
       <KeyboardAvoidingView
@@ -381,7 +575,7 @@ export default function ChatScreen() {
                   { color: theme.colors.onSurfaceVariant },
                 ]}
               >
-                {activeReferences.length > 0
+                {selectedReferences.length > 0
                   ? t("chat.empty_with_reference")
                   : t("chat.empty_subtitle")}
               </Text>
@@ -402,10 +596,10 @@ export default function ChatScreen() {
             },
           ]}
         >
-          {activeReferences.length > 0 ? (
+          {draftReferences.length > 0 ? (
             <View style={styles.composerReferenceRow}>
               <ChatReferenceChipBar
-                references={activeReferences}
+                references={draftReferences}
                 disabled={isStreaming}
                 onRemove={handleRemoveReference}
               />
@@ -465,13 +659,23 @@ export default function ChatScreen() {
         visible={isReferencePickerVisible}
         notes={notes}
         categories={categories}
-        activeReferences={activeReferences}
-        selectedIds={activeReferences.map((reference) => reference.id)}
+        currentReferences={sessionReferences}
+        selectedIds={selectedReferences.map((reference) => reference.id)}
         isLoading={isNotesLoading}
         isLimitReached={isReferenceLimitReached}
-        onRemoveReference={handleRemoveReference}
         onSelect={handleSelectReference}
         onDismiss={() => setIsReferencePickerVisible(false)}
+      />
+      <ChatSessionDrawer
+        visible={isSessionDrawerVisible}
+        conversations={conversations}
+        currentConversationId={conversationId}
+        isLoading={isConversationsLoading || isConversationsRefreshing}
+        isDeleting={isBatchDeleting}
+        onDismiss={() => setIsSessionDrawerVisible(false)}
+        onNewChat={handleResetChat}
+        onSelectConversation={handleSelectConversation}
+        onDeleteConversations={handleDeleteConversations}
       />
     </SafeAreaView>
   );
