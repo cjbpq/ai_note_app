@@ -36,12 +36,44 @@ class FakeVectorClient:
 
 
 class FakeChatModel:
+    def __init__(self):
+        self.stream_calls = []
+
     def generate_title(self, first_message):
         return "测试对话"
 
-    def stream_chat(self, messages):
+    def stream_chat(self, messages, **kwargs):
+        self.stream_calls.append({"messages": messages, "kwargs": kwargs})
         yield "这是"
         yield "回答"
+
+
+class ToolCallingChatModel(FakeChatModel):
+    def stream_chat(self, messages, **kwargs):
+        self.stream_calls.append({"messages": messages, "kwargs": kwargs})
+        yield "这是模型回答。"
+        yield {
+            "type": "tool_calls",
+            "tool_calls": [
+                {
+                    "index": 0,
+                    "id": "call_propose_note",
+                    "type": "function",
+                    "function": {
+                        "name": "propose_note",
+                        "arguments": json.dumps(
+                            {
+                                "title": "费曼学习法",
+                                "content": "费曼学习法要求先用自己的话解释概念，再找出卡住的部分。",
+                                "reason": "这是可复习的方法论结论。",
+                                "tags": ["学习法"],
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                }
+            ],
+        }
 
 
 class FailingQueryVectorClient(FakeVectorClient):
@@ -82,6 +114,89 @@ def test_intent_classifier_distinguishes_chat_question_and_note_suggestion():
     assert classify_chat_intent("你好，根据我的笔记总结极限") == "note_question"
     assert classify_chat_intent("根据我的笔记总结一下极限怎么求？") == "note_question"
     assert classify_chat_intent("帮我记录：链式法则用于复合函数求导") == "out_of_scope_note_worthy"
+
+
+@pytest.mark.unit
+def test_doubao_stream_chat_sends_tools_and_accumulates_streaming_tool_calls():
+    from app.services.doubao_chat_service import DoubaoChatService
+
+    class FakeCompletions:
+        def __init__(self):
+            self.kwargs = None
+
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            return iter(
+                [
+                    {"choices": [{"delta": {"content": "先回答。"}}]},
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "id": "call_1",
+                                            "type": "function",
+                                            "function": {
+                                                "name": "propose_note",
+                                                "arguments": '{"title":"费曼',
+                                            },
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "choices": [
+                            {
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "function": {
+                                                "arguments": '学习法","content":"用自己的话解释概念","reason":null,"tags":["学习法"]}',
+                                            },
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    },
+                ]
+            )
+
+    class FakeChat:
+        def __init__(self):
+            self.completions = FakeCompletions()
+
+    class FakeClient:
+        def __init__(self):
+            self.chat = FakeChat()
+
+    class FakeVisionService:
+        def __init__(self):
+            self.client = FakeClient()
+
+        def _ensure_client(self):
+            return self.client
+
+    service = DoubaoChatService()
+    service._vision_service = FakeVisionService()
+    tools = ChatService.build_note_suggestion_tools()
+
+    events = list(service.stream_chat([{"role": "user", "content": "说说费曼学习法"}], tools=tools))
+
+    assert events[0] == "先回答。"
+    assert events[1]["type"] == "tool_calls"
+    tool_call = events[1]["tool_calls"][0]
+    assert tool_call["id"] == "call_1"
+    assert tool_call["function"]["name"] == "propose_note"
+    assert json.loads(tool_call["function"]["arguments"])["title"] == "费曼学习法"
+    request_kwargs = service._vision_service.client.chat.completions.kwargs
+    assert request_kwargs["tools"] == tools
+    assert request_kwargs["tool_choice"] == "auto"
 
 
 @pytest.mark.unit
@@ -367,6 +482,38 @@ def test_chat_stream_note_suggestion_event_for_note_worthy_message(test_client, 
 
 
 @pytest.mark.integration
+def test_chat_stream_model_tool_call_creates_note_suggestion_for_unmatched_message(test_client, monkeypatch):
+    from app.services import chat_service as chat_service_module
+
+    fake_vector = FakeVectorClient()
+    fake_model = ToolCallingChatModel()
+    monkeypatch.setattr(chat_service_module, "nexoradb_client", fake_vector)
+    monkeypatch.setattr(chat_service_module, "doubao_chat_service", fake_model)
+
+    _, token = _register_and_login(test_client)
+    with test_client.stream(
+        "POST",
+        "/api/v1/chat/stream",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"message": "费曼学习法分四步：选择主题、讲给别人、发现漏洞、简化表达"},
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    retrieval_events = _extract_sse_payloads(body, "retrieval")
+    suggestion_events = _extract_sse_payloads(body, "note_suggestion")
+    done_events = _extract_sse_payloads(body, "done")
+    assert retrieval_events[0]["intent"] == "chat"
+    assert len(suggestion_events) == 1
+    assert suggestion_events[0]["title"] == "费曼学习法"
+    assert suggestion_events[0]["content"] == "费曼学习法要求先用自己的话解释概念，再找出卡住的部分。"
+    assert suggestion_events[0]["tags"] == ["学习法"]
+    assert suggestion_events[0]["metadata"]["source"] == "propose_note_tool_call"
+    assert done_events[0]["suggestion_id"] == suggestion_events[0]["id"]
+    assert fake_model.stream_calls[0]["kwargs"]["tools"][0]["function"]["name"] == "propose_note"
+
+
+@pytest.mark.integration
 def test_chat_stream_nexoradb_failure_emits_sse_error(test_client, monkeypatch):
     from app.services import chat_service as chat_service_module
 
@@ -633,7 +780,7 @@ def test_chat_stream_emits_heartbeat_while_model_is_idle(test_client, monkeypatc
     from app.services import chat_service as chat_service_module
 
     class SlowChatModel(FakeChatModel):
-        def stream_chat(self, messages):
+        def stream_chat(self, messages, **kwargs):
             time.sleep(0.2)
             yield "慢回答"
 

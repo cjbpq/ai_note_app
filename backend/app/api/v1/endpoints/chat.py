@@ -128,12 +128,16 @@ async def stream_chat(
                 conversation_id=conversation.id,
                 intent=intent,
                 references=references,
+                note_tool_enabled=intent != "out_of_scope_note_worthy",
             )
             model_events: queue.Queue[tuple[str, object]] = queue.Queue()
+            note_tools = service.build_note_suggestion_tools() if intent != "out_of_scope_note_worthy" else None
+            model_tool_calls = []
 
             def stream_worker() -> None:
                 try:
-                    for delta_item in service.model_service.stream_chat(model_messages):
+                    stream_kwargs = {"tools": note_tools} if note_tools else {}
+                    for delta_item in service.model_service.stream_chat(model_messages, **stream_kwargs):
                         model_events.put(("delta", delta_item))
                     model_events.put(("done", None))
                 except Exception as exc:  # noqa: BLE001
@@ -154,18 +158,28 @@ async def stream_chat(
                 if event_type == "error":
                     raise payload
 
-                delta = str(payload or "")
+                if isinstance(payload, dict):
+                    payload_type = payload.get("type")
+                    if payload_type == "tool_calls":
+                        model_tool_calls.extend(payload.get("tool_calls") or [])
+                        continue
+                    delta = str(payload.get("delta") or payload.get("content") or "")
+                else:
+                    delta = str(payload or "")
                 if not delta:
                     continue
                 assistant_text += delta
                 yield _sse("delta", {"delta": delta})
 
+            assistant_metadata = {"intent": intent, "references": public_refs}
+            if model_tool_calls:
+                assistant_metadata["tool_calls"] = model_tool_calls
             assistant_message = service.add_message(
                 user_id=current_user.id,
                 conversation_id=conversation.id,
                 role="assistant",
                 content=assistant_text,
-                metadata={"intent": intent, "references": public_refs},
+                metadata=assistant_metadata,
             )
 
             suggestion_payload = None
@@ -175,9 +189,21 @@ async def stream_chat(
                     conversation_id=conversation.id,
                     message_id=assistant_message.id,
                     source_message=body.message,
+                    metadata={"source": "intent_classifier"},
                 )
                 suggestion_payload = service.serialize_suggestion(suggestion)
                 yield _sse("note_suggestion", suggestion_payload)
+            elif model_tool_calls:
+                suggestion = service.create_note_suggestion_from_tool_calls(
+                    user_id=current_user.id,
+                    conversation_id=conversation.id,
+                    message_id=assistant_message.id,
+                    tool_calls=model_tool_calls,
+                    source_message=body.message,
+                )
+                if suggestion:
+                    suggestion_payload = service.serialize_suggestion(suggestion)
+                    yield _sse("note_suggestion", suggestion_payload)
 
             yield _sse(
                 "done",

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Iterable, Iterator, List, Optional
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Union
 
 from app.core.config import settings
 from app.services.doubao_service import DoubaoServiceError, doubao_service
@@ -15,7 +15,13 @@ class DoubaoChatService:
     def __init__(self) -> None:
         self._vision_service = doubao_service
 
-    def stream_chat(self, messages: List[Dict[str, Any]]) -> Iterator[str]:
+    def stream_chat(
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Union[str, Dict[str, Any], None] = "auto",
+    ) -> Iterator[Union[str, Dict[str, Any]]]:
         client = self._vision_service._ensure_client()  # noqa: SLF001 - reuse existing configured Ark client.
         request_kwargs: Dict[str, Any] = {
             "model": settings.DOUBAO_MODEL_ID,
@@ -23,15 +29,25 @@ class DoubaoChatService:
             "stream": True,
             "thinking": {"type": settings.DOUBAO_THINKING_MODE or "disabled"},
         }
+        if tools:
+            request_kwargs["tools"] = tools
+            request_kwargs["tool_choice"] = tool_choice or "auto"
+            request_kwargs["parallel_tool_calls"] = False
         if settings.DOUBAO_MAX_COMPLETION_TOKENS:
             request_kwargs["max_tokens"] = settings.DOUBAO_MAX_COMPLETION_TOKENS
 
         try:
             chunks = client.chat.completions.create(**request_kwargs)
+            tool_call_chunks: Dict[int, Dict[str, Any]] = {}
             for chunk in chunks:
                 delta = self._extract_delta(chunk)
                 if delta:
                     yield delta
+                for tool_call_chunk in self._extract_tool_call_chunks(chunk):
+                    self._accumulate_tool_call_chunk(tool_call_chunks, tool_call_chunk)
+            tool_calls = self._finalize_tool_calls(tool_call_chunks)
+            if tool_calls:
+                yield {"type": "tool_calls", "tool_calls": tool_calls}
         except DoubaoServiceError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -102,6 +118,98 @@ class DoubaoChatService:
         except Exception:
             pass
         return ""
+
+    @staticmethod
+    def _extract_tool_call_chunks(chunk: Any) -> List[Any]:
+        try:
+            choices = getattr(chunk, "choices", None)
+            if choices:
+                delta = getattr(choices[0], "delta", None)
+                tool_calls = getattr(delta, "tool_calls", None)
+                if tool_calls:
+                    return list(tool_calls)
+        except Exception:
+            pass
+
+        try:
+            if isinstance(chunk, dict):
+                choices = chunk.get("choices") or []
+                if choices:
+                    delta = choices[0].get("delta") or {}
+                    tool_calls = delta.get("tool_calls") or []
+                    return list(tool_calls)
+        except Exception:
+            pass
+        return []
+
+    @staticmethod
+    def _to_plain_dict(value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        model_dump = getattr(value, "model_dump", None)
+        if callable(model_dump):
+            return model_dump(exclude_none=True)
+        result: Dict[str, Any] = {}
+        for attr in ("index", "id", "type", "function"):
+            attr_value = getattr(value, attr, None)
+            if attr_value is not None:
+                result[attr] = attr_value
+        return result
+
+    @classmethod
+    def _accumulate_tool_call_chunk(
+        cls,
+        accumulator: Dict[int, Dict[str, Any]],
+        tool_call_chunk: Any,
+    ) -> None:
+        data = cls._to_plain_dict(tool_call_chunk)
+        raw_index = data.get("index", len(accumulator))
+        try:
+            index = int(raw_index)
+        except (TypeError, ValueError):
+            index = len(accumulator)
+
+        current = accumulator.setdefault(
+            index,
+            {
+                "index": index,
+                "id": None,
+                "type": "function",
+                "function": {"name": None, "arguments": ""},
+            },
+        )
+        if data.get("id"):
+            current["id"] = str(data["id"])
+        if data.get("type"):
+            current["type"] = str(data["type"])
+
+        function_data = cls._to_plain_dict(data.get("function") or {})
+        if function_data.get("name"):
+            current["function"]["name"] = str(function_data["name"])
+        if function_data.get("arguments"):
+            current["function"]["arguments"] += str(function_data["arguments"])
+
+    @staticmethod
+    def _finalize_tool_calls(accumulator: Dict[int, Dict[str, Any]]) -> List[Dict[str, Any]]:
+        tool_calls: List[Dict[str, Any]] = []
+        for index in sorted(accumulator):
+            item = accumulator[index]
+            function = item.get("function") or {}
+            name = function.get("name")
+            if not name:
+                continue
+            tool_calls.append(
+                {
+                    "index": index,
+                    "id": item.get("id") or f"tool_call_{index}",
+                    "type": item.get("type") or "function",
+                    "function": {
+                        "name": str(name),
+                        "arguments": str(function.get("arguments") or ""),
+                    },
+                }
+            )
+        return tool_calls
 
 
 doubao_chat_service = DoubaoChatService()
