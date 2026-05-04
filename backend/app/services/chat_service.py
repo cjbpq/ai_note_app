@@ -18,6 +18,7 @@ from app.services.nexoradb_service import NexoraDBClient, NexoraDBError, NexoraD
 logger = logging.getLogger(__name__)
 
 ChatIntent = Literal["chat", "note_question", "out_of_scope_note_worthy"]
+NOTE_SUGGESTION_TOOL_NAME = "propose_note"
 
 
 class ChatNotFoundError(LookupError):
@@ -327,8 +328,13 @@ class ChatService:
         conversation_id: str,
         intent: ChatIntent,
         references: List[Dict[str, Any]],
+        note_tool_enabled: bool = False,
     ) -> List[Dict[str, str]]:
-        system_prompt = self._build_system_prompt(intent=intent, references=references)
+        system_prompt = self._build_system_prompt(
+            intent=intent,
+            references=references,
+            note_tool_enabled=note_tool_enabled,
+        )
         messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
         history_limit = max(1, int(settings.CHAT_HISTORY_CONTEXT_MESSAGES or 12))
         history = (
@@ -346,6 +352,48 @@ class ChatService:
 
     # ── Suggestions ─────────────────────────────────────────────────
 
+    @staticmethod
+    def build_note_suggestion_tools() -> List[Dict[str, Any]]:
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": NOTE_SUGGESTION_TOOL_NAME,
+                    "description": (
+                        "创建一条待用户确认的学习笔记建议。仅当本轮用户输入或助手回答中包含明确、"
+                        "可独立保存的学习内容、概念、方法、结论或复习材料时调用；普通寒暄、内容不足、"
+                        "用户只是在询问但没有形成可保存内容、或用户明确不想保存时不要调用。调用前先完成"
+                        "对用户的正常回答；此工具不会直接保存笔记，只会生成待确认建议。"
+                    ),
+                    "strict": True,
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "title": {
+                                "type": "string",
+                                "description": "建议笔记的简短中文标题，建议 6-24 个字。",
+                            },
+                            "content": {
+                                "type": "string",
+                                "description": "建议保存进笔记的完整正文，需可脱离对话独立理解。",
+                            },
+                            "reason": {
+                                "type": ["string", "null"],
+                                "description": "为什么这条内容值得保存为笔记；没有特别原因时传 null。",
+                            },
+                            "tags": {
+                                "type": "array",
+                                "description": "建议标签，使用短中文词或英文词；没有合适标签时传空数组。",
+                                "items": {"type": "string"},
+                            },
+                        },
+                        "required": ["title", "content", "reason", "tags"],
+                        "additionalProperties": False,
+                    },
+                },
+            }
+        ]
+
     def create_note_suggestion(
         self,
         *,
@@ -353,18 +401,32 @@ class ChatService:
         conversation_id: str,
         message_id: Optional[str],
         source_message: str,
+        title: Optional[str] = None,
+        content: Optional[str] = None,
+        category: Optional[str] = None,
+        tags: Optional[Iterable[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> ChatNoteSuggestion:
-        title = self._suggestion_title(source_message)
+        suggestion_content = " ".join(str(content if content is not None else source_message or "").split())
+        fallback_text = " ".join(str(source_message or "").split())
+        if not suggestion_content:
+            suggestion_content = fallback_text
+        suggestion_title = " ".join(str(title or "").split())[:255] or self._suggestion_title(
+            suggestion_content or fallback_text
+        )
+        suggestion_metadata = {"source": "propose_note"}
+        if metadata:
+            suggestion_metadata.update(metadata)
         suggestion = ChatNoteSuggestion(
             user_id=user_id,
             conversation_id=str(conversation_id),
             message_id=str(message_id) if message_id else None,
-            title=title,
-            content=source_message.strip(),
-            category="聊天补充",
-            tags=["chat"],
+            title=suggestion_title,
+            content=suggestion_content,
+            category=category or "聊天补充",
+            tags=self._normalize_tags(tags) or ["chat"],
             status="pending",
-            suggestion_metadata={"source": "propose_note"},
+            suggestion_metadata=suggestion_metadata,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
@@ -372,6 +434,38 @@ class ChatService:
         self.db.commit()
         self.db.refresh(suggestion)
         return suggestion
+
+    def create_note_suggestion_from_tool_calls(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        message_id: Optional[str],
+        tool_calls: Iterable[Dict[str, Any]],
+        source_message: str,
+    ) -> Optional[ChatNoteSuggestion]:
+        for tool_call in tool_calls:
+            if not isinstance(tool_call, dict):
+                continue
+            payload = self._parse_note_suggestion_tool_call(tool_call)
+            if not payload:
+                continue
+            return self.create_note_suggestion(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                message_id=message_id,
+                source_message=source_message,
+                title=payload.get("title"),
+                content=payload.get("content"),
+                tags=payload.get("tags"),
+                metadata={
+                    "source": "propose_note_tool_call",
+                    "tool_call_id": tool_call.get("id"),
+                    "tool_call_index": tool_call.get("index"),
+                    "reason": payload.get("reason"),
+                },
+            )
+        return None
 
     def get_suggestion(self, *, user_id: str, suggestion_id: str) -> Optional[ChatNoteSuggestion]:
         return (
@@ -584,13 +678,25 @@ class ChatService:
             ref.pop("_explicit", None)
         return out
 
-    def _build_system_prompt(self, *, intent: ChatIntent, references: List[Dict[str, Any]]) -> str:
+    def _build_system_prompt(
+        self,
+        *,
+        intent: ChatIntent,
+        references: List[Dict[str, Any]],
+        note_tool_enabled: bool = False,
+    ) -> str:
         base = (
             "你是 AI Note 的笔记对话助手。请使用简体中文，回答要清晰、准确、可执行。"
             "如果提供了笔记资料，优先基于资料回答；资料不足时明确说明不确定，不要编造笔记中不存在的内容。"
         )
+        if note_tool_enabled:
+            base += (
+                "如果可用工具包含 propose_note，只有当本轮用户输入或你的回答中形成了明确、可独立保存的"
+                "学习笔记内容时，先正常回答用户，再调用 propose_note 生成待确认建议；普通寒暄、泛泛问答、"
+                "内容不足或用户不想保存时不要调用。"
+            )
         if intent == "chat":
-            return base + "当前是闲聊，不需要调用笔记工具。"
+            return base + "当前没有外部笔记资料，直接回答用户。"
         if not references:
             return base + "当前没有可用的笔记检索结果。"
 
@@ -611,3 +717,47 @@ class ChatService:
     def _suggestion_title(text: str) -> str:
         clean = " ".join(str(text or "").split())
         return (clean[:48] or "聊天补充")
+
+    @staticmethod
+    def _normalize_tags(tags: Optional[Iterable[str]]) -> List[str]:
+        normalized: List[str] = []
+        for tag in tags or []:
+            value = " ".join(str(tag or "").split())
+            if not value or value in normalized:
+                continue
+            normalized.append(value[:32])
+            if len(normalized) >= 8:
+                break
+        return normalized
+
+    @classmethod
+    def _parse_note_suggestion_tool_call(cls, tool_call: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        function = tool_call.get("function") or {}
+        if not isinstance(function, dict):
+            return None
+        if function.get("name") != NOTE_SUGGESTION_TOOL_NAME:
+            return None
+
+        raw_arguments = function.get("arguments") or "{}"
+        try:
+            arguments = json.loads(raw_arguments)
+        except (TypeError, json.JSONDecodeError):
+            logger.warning("Invalid propose_note tool arguments: %s", raw_arguments)
+            return None
+        if not isinstance(arguments, dict):
+            return None
+
+        content = " ".join(str(arguments.get("content") or "").split())
+        if len(content) < 4:
+            return None
+        title = " ".join(str(arguments.get("title") or "").split())[:255] or cls._suggestion_title(content)
+        reason_value = arguments.get("reason")
+        reason = " ".join(str(reason_value).split()) if reason_value else None
+        raw_tags = arguments.get("tags")
+        tags = cls._normalize_tags(raw_tags if isinstance(raw_tags, list) else [])
+        return {
+            "title": title,
+            "content": content,
+            "reason": reason,
+            "tags": tags,
+        }
