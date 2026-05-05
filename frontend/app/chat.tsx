@@ -23,6 +23,10 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 
+import {
+  ChatMessageContent,
+  needsStableChatBubbleWidth,
+} from "../components/chat/chat-message-content";
 import { ChatNoteSuggestionCard } from "../components/chat/chat-note-suggestion-card";
 import { ChatReferenceChipBar } from "../components/chat/chat-reference-chip-bar";
 import { ChatReferencePickerSheet } from "../components/chat/chat-reference-picker-sheet";
@@ -545,6 +549,17 @@ export default function ChatScreen() {
         item.role === "assistant" && item.isStreaming && !item.content;
       const messageReferences = getMessageReferences(item.metadata);
       const messageSuggestions = getMessageSuggestions(item.metadata);
+      const contentColor = isError
+        ? theme.colors.onErrorContainer
+        : isUser
+          ? theme.colors.onPrimaryContainer
+          : theme.colors.onSurfaceVariant;
+      const shouldUseStableBubbleWidth = needsStableChatBubbleWidth({
+        content: item.content,
+        isUser,
+        isStreaming: item.isStreaming,
+        isError,
+      });
 
       return (
         <View
@@ -571,6 +586,7 @@ export default function ChatScreen() {
                 isError && {
                   backgroundColor: theme.colors.errorContainer,
                 },
+                shouldUseStableBubbleWidth && styles.richAssistantBubble,
               ]}
             >
               {isUser && messageReferences.length > 0 ? (
@@ -589,18 +605,13 @@ export default function ChatScreen() {
                   </Text>
                 </View>
               ) : (
-                <Text
-                  variant="bodyMedium"
-                  style={{
-                    color: isError
-                      ? theme.colors.onErrorContainer
-                      : isUser
-                        ? theme.colors.onPrimaryContainer
-                        : theme.colors.onSurfaceVariant,
-                  }}
-                >
-                  {item.content}
-                </Text>
+                <ChatMessageContent
+                  content={item.content}
+                  color={contentColor}
+                  isUser={isUser}
+                  isStreaming={item.isStreaming}
+                  isError={isError}
+                />
               )}
               {isStopped ? (
                 <Text
@@ -853,6 +864,10 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
+  },
+  richAssistantBubble: {
+    width: "96%",
+    maxWidth: "96%",
   },
   loadingLine: {
     flexDirection: "row",

@@ -34,6 +34,7 @@ interface MathAwareTextProps {
     | "bodySmall"
     | "bodyMedium"
     | "bodyLarge"
+    | "headlineSmall"
     | "labelSmall"
     | "labelMedium"
     | "titleSmall"

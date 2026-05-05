@@ -24,6 +24,7 @@ import {
 import { FAB, IconButton, Text, useTheme } from "react-native-paper";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ErrorScreen } from "../../components/common";
+import { MathAwareText } from "../../components/common/MathAwareText";
 
 // ===== 组件导入 =====
 import {
@@ -32,8 +33,6 @@ import {
   NoteImage,
   NoteKeyPoints,
   NoteMetaInfo,
-  NoteOriginalText,
-  NoteSections,
   NoteStudyAdvice,
   NoteSummaryCard,
   NoteWarnings,
@@ -397,9 +396,8 @@ export default function NoteDetailScreen() {
       {/* 配置 Stack 导航头部 */}
       <Stack.Screen
         options={{
-          title: isEditing
-            ? t("noteDetail.edit_button")
-            : note.title || t("noteDetail.title"),
+          title: isEditing ? t("noteDetail.edit_button") : undefined,
+          headerTitle: isEditing ? undefined : () => null,
           headerLeft: () => (
             <IconButton
               icon={isEditing ? "close" : "arrow-left"}
@@ -484,11 +482,22 @@ export default function NoteDetailScreen() {
           <NoteEditForm onSave={handleSave} isSaving={isUpdating} />
         ) : (
           <>
-            {/* 元信息：日期、标签、学科 */}
+            {/* 元信息：分类、日期、标签 */}
+            <View style={styles.titleSection}>
+              <MathAwareText
+                content={note.title || t("noteDetail.title")}
+                variant="headlineSmall"
+                textStyle={[styles.noteTitle, { color: theme.colors.onSurface }]}
+                fontSize={24}
+                minHeight={40}
+                selectable
+              />
+            </View>
+
             <NoteMetaInfo
               date={note.date}
+              category={note.category}
               tags={note.tags}
-              subject={note.structuredData?.meta?.subject}
             />
 
             {/* 结构化内容 vs 纯文本兜底 */}
@@ -500,23 +509,17 @@ export default function NoteDetailScreen() {
                 {/* 知识要点 */}
                 <NoteKeyPoints keyPoints={note.structuredData.keyPoints} />
 
-                {/* 内容章节（可折叠） */}
-                <NoteSections sections={note.structuredData.sections} />
-
                 {/* 学习建议 */}
                 <NoteStudyAdvice
                   studyAdvice={note.structuredData.studyAdvice}
                 />
-
-                {/* 原始识别文本（折叠查看） */}
-                <NoteOriginalText rawText={note.structuredData.rawText} />
 
                 {/* AI 处理警告 */}
                 <NoteWarnings warnings={note.structuredData.meta?.warnings} />
               </>
             ) : (
               /* 无结构化数据时，使用旧版纯文本渲染 */
-              <NoteContent title={note.title} content={note.content} />
+              <NoteContent content={note.content} />
             )}
           </>
         )}
@@ -578,6 +581,15 @@ const styles = StyleSheet.create({
   },
   partialCacheText: {
     flex: 1,
+  },
+  titleSection: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    paddingBottom: 10,
+  },
+  noteTitle: {
+    fontWeight: "700",
+    lineHeight: 34,
   },
   askAiFab: {
     position: "absolute",

@@ -9,19 +9,18 @@
  */
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
-import { useTranslation } from "react-i18next";
 import { StyleSheet, View } from "react-native";
-import { Chip, Divider, Surface, Text, useTheme } from "react-native-paper";
+import { Chip, Text, useTheme } from "react-native-paper";
 import { toSafeStringArray } from "../../utils/safeData";
 
 // ========== Props 类型定义 ==========
 interface NoteMetaInfoProps {
   /** 创建日期字符串 */
   date?: string;
+  /** 用户选择的笔记分类 */
+  category?: string;
   /** 标签数组 */
   tags?: string[];
-  /** 学科名称（来自 structured_data.meta.subject） */
-  subject?: string;
 }
 
 /**
@@ -30,131 +29,123 @@ interface NoteMetaInfoProps {
  */
 export const NoteMetaInfo: React.FC<NoteMetaInfoProps> = ({
   date,
+  category,
   tags,
-  subject,
 }) => {
-  const { t } = useTranslation();
   const theme = useTheme();
 
-  // 如果没有日期、标签和学科，不渲染
   const safeTags = toSafeStringArray(tags);
   const hasTags = safeTags.length > 0;
-  if (!date && !hasTags && !subject) {
+  const hasCategory = !!category?.trim();
+  if (!date && !hasTags && !hasCategory) {
     return null;
   }
 
   return (
-    <>
-      {/* 日期区域 */}
-      {date && (
-        <Surface style={styles.headerSection} elevation={0}>
-          <View style={styles.dateRow}>
-            <Ionicons
-              name="time-outline"
-              size={16}
-              color={theme.colors.outline}
-            />
-            <Text
-              variant="bodySmall"
-              style={[styles.dateText, { color: theme.colors.outline }]}
-            >
-              {t("noteDetail.created_at")}: {date}
-            </Text>
-          </View>
-        </Surface>
-      )}
-
-      {/* 学科标签 */}
-      {subject && (
-        <View style={styles.subjectRow}>
-          <Ionicons
-            name="school-outline"
-            size={16}
-            color={theme.colors.tertiary}
-          />
-          <Text
-            variant="bodySmall"
-            style={[styles.subjectText, { color: theme.colors.tertiary }]}
-          >
-            {t("noteDetail.subject_label")}: {subject}
-          </Text>
-        </View>
-      )}
-
-      {/* 分隔线 */}
-      {(date || hasTags || subject) && <Divider style={styles.divider} />}
-
-      {/* 标签区域 */}
-      {hasTags && (
-        <View style={styles.tagsSection}>
-          <Text
-            variant="labelMedium"
-            style={[styles.sectionLabel, { color: theme.colors.secondary }]}
-          >
-            {t("noteDetail.tags_label")}
-          </Text>
-          <View style={styles.tagsWrap}>
-            {safeTags.map((tag) => (
-              <Chip
-                key={tag}
-                style={[
-                  styles.tag,
-                  { backgroundColor: theme.colors.secondaryContainer },
-                ]}
-                textStyle={{ color: theme.colors.onSecondaryContainer }}
-                compact
+    <View style={styles.container}>
+      {(hasCategory || date) && (
+        <View style={styles.metaRow}>
+          {hasCategory && (
+            <View style={styles.metaItem}>
+              <Ionicons
+                name="folder-outline"
+                size={15}
+                color={theme.colors.onSurfaceVariant}
+              />
+              <Text
+                variant="bodySmall"
+                style={{ color: theme.colors.onSurfaceVariant }}
+                numberOfLines={1}
               >
-                {tag}
-              </Chip>
-            ))}
-          </View>
+                {category}
+              </Text>
+            </View>
+          )}
+
+          {hasCategory && date ? (
+            <View
+              style={[
+                styles.dot,
+                { backgroundColor: theme.colors.outlineVariant },
+              ]}
+            />
+          ) : null}
+
+          {date && (
+            <View style={styles.metaItem}>
+              <Ionicons
+                name="time-outline"
+                size={15}
+                color={theme.colors.outline}
+              />
+              <Text
+                variant="bodySmall"
+                style={{ color: theme.colors.outline }}
+                numberOfLines={1}
+              >
+                {date}
+              </Text>
+            </View>
+          )}
         </View>
       )}
-    </>
+
+      {hasTags && (
+        <View style={styles.tagsWrap}>
+          {safeTags.map((tag) => (
+            <Chip
+              key={tag}
+              style={[
+                styles.tag,
+                { backgroundColor: theme.colors.secondaryContainer },
+              ]}
+              textStyle={[
+                styles.tagText,
+                { color: theme.colors.onSecondaryContainer },
+              ]}
+              compact
+            >
+              {tag}
+            </Chip>
+          ))}
+        </View>
+      )}
+    </View>
   );
 };
 
 // ========== 样式定义 ==========
 const styles = StyleSheet.create({
-  headerSection: {
+  container: {
     paddingHorizontal: 16,
-    paddingTop: 8,
+    gap: 10,
   },
-  dateRow: {
+  metaRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 8,
+    flexWrap: "wrap",
+    gap: 8,
   },
-  dateText: {
-    marginLeft: 6,
-  },
-  subjectRow: {
+  metaItem: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    marginTop: 6,
+    gap: 5,
   },
-  subjectText: {
-    marginLeft: 6,
-  },
-  divider: {
-    marginVertical: 16,
-    marginHorizontal: 16,
-  },
-  tagsSection: {
-    paddingHorizontal: 16,
-    marginBottom: 16,
-  },
-  sectionLabel: {
-    marginBottom: 8,
+  dot: {
+    width: 3,
+    height: 3,
+    borderRadius: 1.5,
   },
   tagsWrap: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
+    gap: 6,
   },
   tag: {
-    marginRight: 4,
+    height: 30,
+  },
+  tagText: {
+    fontSize: 12,
   },
 });
 
