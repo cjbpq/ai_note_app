@@ -76,6 +76,30 @@ class ToolCallingChatModel(FakeChatModel):
         }
 
 
+class UsageChatModel(FakeChatModel):
+    def stream_chat(self, messages, **kwargs):
+        self.stream_calls.append({"messages": messages, "kwargs": kwargs})
+        yield "answer"
+        yield {
+            "type": "usage",
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120,
+                "cached_tokens": 60,
+                "cache_hit": True,
+                "cache_hit_ratio": 0.6,
+            },
+        }
+
+
+class ReasoningChatModel(FakeChatModel):
+    def stream_chat(self, messages, **kwargs):
+        self.stream_calls.append({"messages": messages, "kwargs": kwargs})
+        yield {"type": "reasoning_delta", "delta": "先分析引用资料。"}
+        yield "final answer"
+
+
 class FailingQueryVectorClient(FakeVectorClient):
     def query_text(self, *, user_id, text, top_k, where=None, library="notes"):
         raise NexoraDBError("vector backend unavailable")
@@ -117,6 +141,18 @@ def test_intent_classifier_distinguishes_chat_question_and_note_suggestion():
 
 
 @pytest.mark.unit
+def test_note_tool_policy_keeps_explicit_note_add_requests_with_references():
+    from app.services.chat_service import should_enable_note_suggestion_tool
+
+    refs = [{"note_id": "note-1", "chunk_id": "section-1"}]
+
+    assert should_enable_note_suggestion_tool(intent="chat", references=refs) is False
+    assert should_enable_note_suggestion_tool(intent="note_question", references=refs) is False
+    assert should_enable_note_suggestion_tool(intent="out_of_scope_note_worthy", references=refs) is True
+    assert should_enable_note_suggestion_tool(intent="chat", references=[]) is True
+
+
+@pytest.mark.unit
 def test_doubao_stream_chat_sends_tools_and_accumulates_streaming_tool_calls():
     from app.services.doubao_chat_service import DoubaoChatService
 
@@ -144,8 +180,8 @@ def test_doubao_stream_chat_sends_tools_and_accumulates_streaming_tool_calls():
                                             },
                                         }
                                     ]
-                                }
-                            }
+            }
+        }
                         ]
                     },
                     {
@@ -197,6 +233,130 @@ def test_doubao_stream_chat_sends_tools_and_accumulates_streaming_tool_calls():
     request_kwargs = service._vision_service.client.chat.completions.kwargs
     assert request_kwargs["tools"] == tools
     assert request_kwargs["tool_choice"] == "auto"
+    assert request_kwargs["stream_options"] == {"include_usage": True}
+
+
+@pytest.mark.unit
+def test_doubao_stream_chat_emits_normalized_cached_usage():
+    from app.services.doubao_chat_service import DoubaoChatService
+
+    class FakeCompletions:
+        def __init__(self):
+            self.kwargs = None
+
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            return iter(
+                [
+                    {"choices": [{"delta": {"content": "hello"}}]},
+                    {
+                        "choices": [],
+                        "usage": {
+                            "prompt_tokens": 100,
+                            "completion_tokens": 10,
+                            "total_tokens": 110,
+                            "prompt_tokens_details": {"cached_tokens": 75},
+                        },
+                    },
+                ]
+            )
+
+    class FakeChat:
+        def __init__(self):
+            self.completions = FakeCompletions()
+
+    class FakeClient:
+        def __init__(self):
+            self.chat = FakeChat()
+
+    class FakeVisionService:
+        def __init__(self):
+            self.client = FakeClient()
+
+        def _ensure_client(self):
+            return self.client
+
+    service = DoubaoChatService()
+    service._vision_service = FakeVisionService()
+
+    events = list(service.stream_chat([{"role": "user", "content": "hi"}], thinking_enabled=True))
+
+    assert events[0] == "hello"
+    assert events[1] == {
+        "type": "usage",
+        "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 10,
+            "total_tokens": 110,
+            "cached_tokens": 75,
+            "cache_hit": True,
+            "cache_hit_ratio": 0.75,
+        },
+    }
+    request_kwargs = service._vision_service.client.chat.completions.kwargs
+    assert request_kwargs["thinking"] == {"type": "enabled"}
+    assert request_kwargs["stream_options"] == {"include_usage": True}
+
+
+@pytest.mark.unit
+def test_doubao_usage_preserves_missing_cached_tokens_as_null():
+    from app.services.doubao_chat_service import DoubaoChatService
+
+    usage = DoubaoChatService._normalize_usage(
+        {
+            "prompt_tokens": 100,
+            "completion_tokens": 10,
+            "total_tokens": 110,
+        }
+    )
+
+    assert usage == {
+        "prompt_tokens": 100,
+        "completion_tokens": 10,
+        "total_tokens": 110,
+        "cached_tokens": None,
+        "cache_hit": None,
+        "cache_hit_ratio": None,
+    }
+
+
+@pytest.mark.unit
+def test_doubao_stream_chat_emits_reasoning_delta_separately():
+    from app.services.doubao_chat_service import DoubaoChatService
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            return iter(
+                [
+                    {"choices": [{"delta": {"reasoning_content": "thinking step"}}]},
+                    {"choices": [{"delta": {"content": "answer"}}]},
+                ]
+            )
+
+    class FakeChat:
+        def __init__(self):
+            self.completions = FakeCompletions()
+
+    class FakeClient:
+        def __init__(self):
+            self.chat = FakeChat()
+
+    class FakeVisionService:
+        def __init__(self):
+            self.client = FakeClient()
+
+        def _ensure_client(self):
+            return self.client
+
+    service = DoubaoChatService()
+    service._vision_service = FakeVisionService()
+
+    events = list(service.stream_chat([{"role": "user", "content": "hi"}], thinking_enabled=True))
+
+    assert events == [
+        {"type": "reasoning_delta", "delta": "thinking step"},
+        "answer",
+    ]
 
 
 @pytest.mark.unit
@@ -254,9 +414,46 @@ def test_referenced_notes_can_skip_vector_query(db_session, test_user):
         query_vector=False,
     )
 
-    assert len(refs) == 1
+    assert len(refs) == 2
     assert refs[0]["note_id"] == note.id
     assert fake_vector.queries == []
+
+
+@pytest.mark.unit
+def test_explicit_references_include_all_chunks_and_short_chat_context(db_session, test_user):
+    fake_vector = FakeVectorClient()
+    note = _make_note(test_user.id)
+    db_session.add(note)
+    db_session.commit()
+
+    service = ChatService(db_session, vector_client=fake_vector, model_service=FakeChatModel())
+    conversation = service.get_or_create_conversation(
+        user_id=test_user.id,
+        conversation_id=None,
+        first_message="6",
+    )
+    service.add_message(user_id=test_user.id, conversation_id=conversation.id, role="user", content="6")
+
+    refs = service.retrieve_references(
+        user_id=test_user.id,
+        message="6",
+        referenced_note_ids=[note.id],
+        query_vector=False,
+    )
+    messages = service.build_model_messages(
+        user_id=test_user.id,
+        conversation_id=conversation.id,
+        intent="chat",
+        references=refs,
+    )
+    combined_context = "\n".join(message["content"] for message in messages)
+
+    assert len(refs) == 2
+    assert [ref["chunk_id"] for ref in refs] == ["section-1", "section-2"]
+    assert "6" in messages[-1]["content"]
+    assert note.title in combined_context
+    assert "定义" in combined_context
+    assert "计算" in combined_context
 
 
 @pytest.mark.unit
@@ -367,6 +564,40 @@ def test_reference_dedupe_uses_configured_max_notes(db_session, test_user, monke
 
 
 @pytest.mark.unit
+def test_compact_writes_summary_without_hiding_original_messages(db_session, test_user):
+    service = ChatService(db_session, vector_client=FakeVectorClient(), model_service=FakeChatModel())
+    conversation = service.get_or_create_conversation(
+        user_id=test_user.id,
+        conversation_id=None,
+        first_message="start compact",
+    )
+    for idx in range(16):
+        role = "user" if idx % 2 == 0 else "assistant"
+        service.add_message(
+            user_id=test_user.id,
+            conversation_id=conversation.id,
+            role=role,
+            content=f"message {idx}",
+        )
+
+    compacted = service.compact_conversation(user_id=test_user.id, conversation_id=conversation.id, force=True)
+    db_session.refresh(conversation)
+    all_messages = service.get_messages(user_id=test_user.id, conversation_id=conversation.id)
+    model_messages = service.build_model_messages(
+        user_id=test_user.id,
+        conversation_id=conversation.id,
+        intent="chat",
+        references=[],
+    )
+
+    assert compacted is True
+    assert conversation.context_summary
+    assert conversation.context_compacted_until_sequence == 4
+    assert len(all_messages) == 16
+    assert len([message for message in model_messages if message["role"] in {"user", "assistant"}]) == 12
+
+
+@pytest.mark.unit
 def test_search_conversations_returns_distinct_conversations(db_session, test_user):
     service = ChatService(db_session, vector_client=FakeVectorClient(), model_service=FakeChatModel())
     conversation = service.get_or_create_conversation(
@@ -453,6 +684,281 @@ def test_chat_stream_persists_messages_and_emits_sse(test_client, monkeypatch):
     assert "event: delta" in body
     assert "event: done" in body
     assert note_id in body
+
+
+@pytest.mark.integration
+def test_chat_stream_short_text_includes_five_explicit_references(test_client, monkeypatch):
+    from app.services import chat_service as chat_service_module
+    from app.services import note_index_service
+
+    fake_vector = FakeVectorClient()
+    fake_model = FakeChatModel()
+    monkeypatch.setattr(chat_service_module, "nexoradb_client", fake_vector)
+    monkeypatch.setattr(chat_service_module, "doubao_chat_service", fake_model)
+    monkeypatch.setattr(note_index_service, "nexoradb_client", fake_vector)
+
+    user_id, token = _register_and_login(test_client)
+    headers = {"Authorization": f"Bearer {token}"}
+    note_ids = []
+    with SessionLocal() as session:
+        for idx in range(5):
+            note = NoteService(session).create_note(
+                {
+                    "title": f"explicit-note-{idx}",
+                    "category": "test",
+                    "tags": [],
+                    "image_urls": [],
+                    "image_filenames": [],
+                    "image_sizes": [],
+                    "original_text": f"explicit content {idx}",
+                    "structured_data": {
+                        "summary": f"summary {idx}",
+                        "sections": [{"heading": "main", "content": f"explicit section content {idx}"}],
+                    },
+                },
+                user_id,
+                device_id=user_id,
+            )
+            note_ids.append(note.id)
+
+    with test_client.stream(
+        "POST",
+        "/api/v1/chat/stream",
+        headers=headers,
+        json={"message": "6", "referenced_note_ids": note_ids},
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    retrieval = _extract_sse_payloads(body, "retrieval")[0]
+    model_context = "\n".join(message["content"] for message in fake_model.stream_calls[0]["messages"])
+
+    assert retrieval["intent"] == "chat"
+    assert retrieval["requested_note_ids"] == note_ids
+    assert retrieval["effective_note_ids"] == note_ids
+    assert retrieval["reference_count"] == 5
+    assert "tools" not in fake_model.stream_calls[0]["kwargs"]
+    for idx, note_id in enumerate(note_ids):
+        assert note_id in model_context
+        assert f"explicit section content {idx}" in model_context
+    assert fake_vector.queries == []
+
+
+@pytest.mark.integration
+def test_chat_stream_explicit_note_add_keeps_tool_calling_with_references(test_client, monkeypatch):
+    from app.services import chat_service as chat_service_module
+    from app.services import note_index_service
+
+    fake_vector = FakeVectorClient()
+    fake_model = FakeChatModel()
+    monkeypatch.setattr(chat_service_module, "nexoradb_client", fake_vector)
+    monkeypatch.setattr(chat_service_module, "doubao_chat_service", fake_model)
+    monkeypatch.setattr(note_index_service, "nexoradb_client", fake_vector)
+
+    user_id, token = _register_and_login(test_client)
+    with SessionLocal() as session:
+        note = NoteService(session).create_note(
+            {
+                "title": "source note",
+                "category": "test",
+                "tags": [],
+                "image_urls": [],
+                "image_filenames": [],
+                "image_sizes": [],
+                "original_text": "source content",
+                "structured_data": {
+                    "summary": "source summary",
+                    "sections": [{"heading": "main", "content": "source section content"}],
+                },
+            },
+            user_id,
+            device_id=user_id,
+        )
+        note_id = note.id
+
+    with test_client.stream(
+        "POST",
+        "/api/v1/chat/stream",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"message": "帮我记录：把这条引用资料整理成笔记", "referenced_note_ids": [note_id]},
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    retrieval = _extract_sse_payloads(body, "retrieval")[0]
+    suggestion_events = _extract_sse_payloads(body, "note_suggestion")
+    assert retrieval["intent"] == "out_of_scope_note_worthy"
+    assert fake_model.stream_calls[0]["kwargs"]["tools"][0]["function"]["name"] == "propose_note"
+    assert len(suggestion_events) == 1
+
+
+@pytest.mark.integration
+def test_chat_stream_emits_usage_and_done_usage(test_client, monkeypatch):
+    from app.services import chat_service as chat_service_module
+
+    fake_model = UsageChatModel()
+    monkeypatch.setattr(chat_service_module, "nexoradb_client", FakeVectorClient())
+    monkeypatch.setattr(chat_service_module, "doubao_chat_service", fake_model)
+
+    _, token = _register_and_login(test_client)
+    with test_client.stream(
+        "POST",
+        "/api/v1/chat/stream",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"message": "hello"},
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    usage_events = _extract_sse_payloads(body, "usage")
+    done_events = _extract_sse_payloads(body, "done")
+    assert usage_events == [
+        {
+            "prompt_tokens": 100,
+            "completion_tokens": 20,
+            "total_tokens": 120,
+            "cached_tokens": 60,
+            "cache_hit": True,
+            "cache_hit_ratio": 0.6,
+        }
+    ]
+    assert done_events[0]["usage"] == usage_events[0]
+
+
+@pytest.mark.integration
+def test_chat_stream_emits_reasoning_delta_and_done_reasoning(test_client, monkeypatch):
+    from app.services import chat_service as chat_service_module
+
+    fake_model = ReasoningChatModel()
+    monkeypatch.setattr(chat_service_module, "nexoradb_client", FakeVectorClient())
+    monkeypatch.setattr(chat_service_module, "doubao_chat_service", fake_model)
+
+    _, token = _register_and_login(test_client)
+    headers = {"Authorization": f"Bearer {token}"}
+    test_client.put(
+        "/api/v1/auth/preferences",
+        headers=headers,
+        json={"chat_thinking_enabled": True},
+    )
+
+    with test_client.stream(
+        "POST",
+        "/api/v1/chat/stream",
+        headers=headers,
+        json={"message": "分析一下"},
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    reasoning_events = _extract_sse_payloads(body, "reasoning_delta")
+    delta_events = _extract_sse_payloads(body, "delta")
+    done_events = _extract_sse_payloads(body, "done")
+
+    assert reasoning_events == [{"delta": "先分析引用资料。"}]
+    assert delta_events == [{"delta": "final answer"}]
+    assert done_events[0]["reasoning_content"] == "先分析引用资料。"
+    assert fake_model.stream_calls[0]["kwargs"]["thinking_enabled"] is True
+
+    detail_resp = test_client.get(
+        f"/api/v1/chat/conversations/{done_events[0]['conversation_id']}",
+        headers=headers,
+    )
+    assistant_message = detail_resp.json()["messages"][-1]
+    assert assistant_message["metadata"]["reasoning_content"] == "先分析引用资料。"
+
+
+@pytest.mark.integration
+def test_auth_preferences_control_chat_thinking(test_client, monkeypatch):
+    from app.services import chat_service as chat_service_module
+
+    fake_model = FakeChatModel()
+    monkeypatch.setattr(chat_service_module, "nexoradb_client", FakeVectorClient())
+    monkeypatch.setattr(chat_service_module, "doubao_chat_service", fake_model)
+
+    _, token = _register_and_login(test_client)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    default_resp = test_client.get("/api/v1/auth/preferences", headers=headers)
+    assert default_resp.status_code == 200
+    assert default_resp.json() == {"chat_thinking_enabled": False}
+
+    update_resp = test_client.put(
+        "/api/v1/auth/preferences",
+        headers=headers,
+        json={"chat_thinking_enabled": True},
+    )
+    assert update_resp.status_code == 200
+    assert update_resp.json() == {"chat_thinking_enabled": True}
+
+    with test_client.stream(
+        "POST",
+        "/api/v1/chat/stream",
+        headers=headers,
+        json={"message": "hello"},
+    ) as response:
+        assert response.status_code == 200
+        "".join(response.iter_text())
+
+    assert fake_model.stream_calls[0]["kwargs"]["thinking_enabled"] is True
+
+
+@pytest.mark.integration
+def test_chat_stream_context_length_error_compacts_and_retries(test_client, monkeypatch):
+    from app.services import chat_service as chat_service_module
+    from app.services.doubao_service import DoubaoServiceError
+
+    class ContextFailOnceModel(FakeChatModel):
+        @staticmethod
+        def is_context_length_error(exc):
+            return "context length" in str(exc).lower()
+
+        def stream_chat(self, messages, **kwargs):
+            self.stream_calls.append({"messages": messages, "kwargs": kwargs})
+            if len(self.stream_calls) == 1:
+                raise DoubaoServiceError("context length exceeded")
+            yield "retried answer"
+
+    fake_model = ContextFailOnceModel()
+    monkeypatch.setattr(chat_service_module, "nexoradb_client", FakeVectorClient())
+    monkeypatch.setattr(chat_service_module, "doubao_chat_service", fake_model)
+
+    user_id, token = _register_and_login(test_client)
+    with SessionLocal() as session:
+        service = ChatService(session, vector_client=FakeVectorClient(), model_service=FakeChatModel())
+        conversation = service.get_or_create_conversation(
+            user_id=user_id,
+            conversation_id=None,
+            first_message="old start",
+        )
+        conversation_id = conversation.id
+        for idx in range(16):
+            service.add_message(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                role="user" if idx % 2 == 0 else "assistant",
+                content=f"old message {idx}",
+            )
+
+    with test_client.stream(
+        "POST",
+        "/api/v1/chat/stream",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"conversation_id": conversation_id, "message": "continue"},
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    assert "event: error" not in body
+    assert "retried answer" in body
+    assert len(fake_model.stream_calls) == 2
+    with SessionLocal() as session:
+        conversation = (
+            session.query(chat_service_module.ChatConversation)
+            .filter(chat_service_module.ChatConversation.id == conversation_id)
+            .first()
+        )
+        assert conversation.context_summary
+        assert conversation.context_compacted_until_sequence is not None
 
 
 @pytest.mark.integration

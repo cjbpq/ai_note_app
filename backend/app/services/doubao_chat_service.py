@@ -21,13 +21,15 @@ class DoubaoChatService:
         *,
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Union[str, Dict[str, Any], None] = "auto",
+        thinking_enabled: bool = False,
     ) -> Iterator[Union[str, Dict[str, Any]]]:
         client = self._vision_service._ensure_client()  # noqa: SLF001 - reuse existing configured Ark client.
         request_kwargs: Dict[str, Any] = {
             "model": settings.DOUBAO_MODEL_ID,
             "messages": messages,
             "stream": True,
-            "thinking": {"type": settings.DOUBAO_THINKING_MODE or "disabled"},
+            "thinking": {"type": "enabled" if thinking_enabled else "disabled"},
+            "stream_options": {"include_usage": True},
         }
         if tools:
             request_kwargs["tools"] = tools
@@ -39,7 +41,14 @@ class DoubaoChatService:
         try:
             chunks = client.chat.completions.create(**request_kwargs)
             tool_call_chunks: Dict[int, Dict[str, Any]] = {}
+            final_usage: Optional[Dict[str, Any]] = None
             for chunk in chunks:
+                usage = self._extract_usage(chunk)
+                if usage:
+                    final_usage = usage
+                reasoning_delta = self._extract_reasoning_delta(chunk)
+                if reasoning_delta:
+                    yield {"type": "reasoning_delta", "delta": reasoning_delta}
                 delta = self._extract_delta(chunk)
                 if delta:
                     yield delta
@@ -48,6 +57,8 @@ class DoubaoChatService:
             tool_calls = self._finalize_tool_calls(tool_call_chunks)
             if tool_calls:
                 yield {"type": "tool_calls", "tool_calls": tool_calls}
+            if final_usage:
+                yield {"type": "usage", "usage": self._normalize_usage(final_usage)}
         except DoubaoServiceError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -86,6 +97,26 @@ class DoubaoChatService:
         return title[:80] or fallback
 
     @staticmethod
+    def is_context_length_error(exc: BaseException) -> bool:
+        text = str(exc or "").lower()
+        markers = (
+            "context length",
+            "context_length",
+            "maximum context",
+            "max context",
+            "too many tokens",
+            "token limit",
+            "input is too long",
+            "input too long",
+            "prompt is too long",
+            "tokens exceed",
+            "exceeds model",
+            "exceeded model",
+            "exceeded context",
+        )
+        return any(marker in text for marker in markers)
+
+    @staticmethod
     def _fallback_title(first_message: str) -> str:
         clean = " ".join(str(first_message or "").split())
         return (clean[:48] or "新对话")
@@ -120,6 +151,40 @@ class DoubaoChatService:
         return ""
 
     @staticmethod
+    def _extract_reasoning_delta(chunk: Any) -> str:
+        try:
+            choices = getattr(chunk, "choices", None)
+            if choices:
+                first = choices[0]
+                delta = getattr(first, "delta", None)
+                reasoning_content = getattr(delta, "reasoning_content", None)
+                if reasoning_content:
+                    return str(reasoning_content)
+                message = getattr(first, "message", None)
+                message_reasoning = getattr(message, "reasoning_content", None)
+                if message_reasoning:
+                    return str(message_reasoning)
+        except Exception:
+            pass
+
+        try:
+            if isinstance(chunk, dict):
+                choices = chunk.get("choices") or []
+                if choices:
+                    first = choices[0] or {}
+                    delta = first.get("delta") or {}
+                    reasoning_content = delta.get("reasoning_content")
+                    if reasoning_content:
+                        return str(reasoning_content)
+                    message = first.get("message") or {}
+                    message_reasoning = message.get("reasoning_content")
+                    if message_reasoning:
+                        return str(message_reasoning)
+        except Exception:
+            pass
+        return ""
+
+    @staticmethod
     def _extract_tool_call_chunks(chunk: Any) -> List[Any]:
         try:
             choices = getattr(chunk, "choices", None)
@@ -141,6 +206,71 @@ class DoubaoChatService:
         except Exception:
             pass
         return []
+
+    @staticmethod
+    def _extract_usage(chunk: Any) -> Optional[Dict[str, Any]]:
+        try:
+            usage = getattr(chunk, "usage", None)
+            if usage:
+                plain = DoubaoChatService._to_plain_dict(usage)
+                if plain:
+                    return plain
+                return {
+                    "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                    "completion_tokens": getattr(usage, "completion_tokens", None),
+                    "total_tokens": getattr(usage, "total_tokens", None),
+                    "prompt_tokens_details": getattr(usage, "prompt_tokens_details", None),
+                }
+        except Exception:
+            pass
+
+        try:
+            if isinstance(chunk, dict):
+                usage = chunk.get("usage")
+                if isinstance(usage, dict):
+                    return usage
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _normalize_usage(usage: Dict[str, Any]) -> Dict[str, Any]:
+        prompt_tokens = DoubaoChatService._as_int(usage.get("prompt_tokens"))
+        completion_tokens = DoubaoChatService._as_int(usage.get("completion_tokens"))
+        total_tokens = DoubaoChatService._as_int(usage.get("total_tokens"))
+
+        details = usage.get("prompt_tokens_details") or usage.get("prompt_tokens_detail") or {}
+        if not isinstance(details, dict):
+            plain_details = DoubaoChatService._to_plain_dict(details)
+            details = plain_details or {"cached_tokens": getattr(details, "cached_tokens", None)}
+        raw_cached_tokens = details.get("cached_tokens")
+        cached_tokens = (
+            DoubaoChatService._as_int(raw_cached_tokens)
+            if raw_cached_tokens is not None
+            else None
+        )
+        cache_hit = (cached_tokens > 0) if cached_tokens is not None else None
+        cache_hit_ratio = (
+            (cached_tokens / prompt_tokens)
+            if cached_tokens is not None and prompt_tokens > 0
+            else None
+        )
+
+        return {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "cached_tokens": cached_tokens,
+            "cache_hit": cache_hit,
+            "cache_hit_ratio": cache_hit_ratio,
+        }
+
+    @staticmethod
+    def _as_int(value: Any) -> int:
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
 
     @staticmethod
     def _to_plain_dict(value: Any) -> Dict[str, Any]:

@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     CHAT_RAG_MAX_NOTES: int = 4
     CHAT_RAG_MAX_CONTEXT_CHARS: int = 12000
     CHAT_HISTORY_CONTEXT_MESSAGES: int = 12
+    DOUBAO_CONTEXT_WINDOW_TOKENS: int = 256000
+    CHAT_COMPACT_KEEP_RECENT_MESSAGES: int = 12
     CHAT_STREAM_HEARTBEAT_SECONDS: int = 12
 
     # Doubao configuration
