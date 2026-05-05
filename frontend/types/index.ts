@@ -160,6 +160,156 @@ export interface NoteCardProps {
 }
 
 // ========================================
+// 【AI Chat 相关类型】
+// ========================================
+
+export type ChatRole = "user" | "assistant" | "system";
+export type ChatMessageStatus =
+  | "pending"
+  | "streaming"
+  | "done"
+  | "error"
+  | "stopped";
+
+export interface ChatMessage {
+  id: string;
+  serverId?: string;
+  conversationId?: string;
+  role: ChatRole;
+  content: string;
+  sequence?: number;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  status?: ChatMessageStatus;
+  isStreaming?: boolean;
+  isLocal?: boolean;
+}
+
+export interface ChatConversation {
+  id: string;
+  title: string;
+  parent_conversation_id?: string | null;
+  forked_from_message_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatMessageResponse {
+  id: string;
+  conversation_id: string;
+  role: ChatRole;
+  content: string;
+  sequence: number;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ChatConversationListResponse {
+  conversations: ChatConversation[];
+  total: number;
+}
+
+export interface ChatConversationSearchResponse {
+  conversations: ChatConversation[];
+  total: number;
+}
+
+export interface ChatConversationDetailResponse {
+  conversation: ChatConversation;
+  messages: ChatMessageResponse[];
+}
+
+export interface ChatConversationBatchDeleteRequest {
+  conversation_ids: string[];
+}
+
+export interface ChatConversationBatchDeleteResponse {
+  deleted_count: number;
+  not_found_ids: string[];
+}
+
+export interface ChatReferenceNote {
+  id: string;
+  title: string;
+  imageUrl?: string;
+  category?: string;
+}
+
+export interface ChatStreamRequest {
+  conversation_id?: string | null;
+  message: string;
+  referenced_note_ids?: string[];
+  rag_top_k?: number | null;
+}
+
+export interface ChatConversationIdPayload {
+  conversation_id?: string;
+}
+
+export interface ChatRetrievalPayload {
+  intent?: string;
+  references?: ChatReference[];
+  [key: string]: unknown;
+}
+
+export interface ChatReference {
+  note_id?: string;
+  title?: string;
+  content?: string;
+  score?: number;
+  [key: string]: unknown;
+}
+
+export interface ChatDeltaPayload {
+  delta?: string;
+}
+
+export type ChatSuggestionStatus = "pending" | "accepted" | "dismissed";
+
+export interface ChatNoteSuggestion {
+  id: string;
+  conversation_id: string;
+  message_id?: string | null;
+  title: string;
+  content: string;
+  category?: string | null;
+  tags: string[];
+  status: ChatSuggestionStatus;
+  note_id?: string | null;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatSuggestionAcceptResponse {
+  suggestion: ChatNoteSuggestion;
+  note_id: string;
+}
+
+export interface ChatDonePayload {
+  conversation_id?: string;
+  message_id?: string;
+  suggestion_id?: string | null;
+}
+
+export interface ChatErrorPayload {
+  message?: string;
+  detail?: string;
+  error?: string;
+  code?: string;
+  [key: string]: unknown;
+}
+
+export type ChatStreamEvent =
+  | { type: "conversation_id"; data: ChatConversationIdPayload }
+  | { type: "retrieval"; data: ChatRetrievalPayload }
+  | { type: "delta"; data: ChatDeltaPayload }
+  | { type: "note_suggestion"; data: ChatNoteSuggestion }
+  | { type: "done"; data: ChatDonePayload }
+  | { type: "error"; data: ChatErrorPayload }
+  | { type: "unknown"; event: string; data: unknown };
+
+// ========================================
 // 【搜索相关类型】
 // ========================================
 
@@ -561,6 +711,14 @@ export interface TokenRefreshResponse {
   token_type: string;
   expires_in: number;
   expires_at: string;
+}
+
+export interface UserPreferencesRequest {
+  chat_thinking_enabled: boolean;
+}
+
+export interface UserPreferencesResponse {
+  chat_thinking_enabled: boolean;
 }
 
 /**

@@ -1,96 +1,99 @@
-/**
- * NoteWarnings 组件
- *
- * 职责：展示 AI 处理过程中的警告信息（structured_data.meta.warnings）
- *
- * 设计说明：
- * - 使用 errorContainer 色彩体系，醒目提示
- * - 警告图标 + 文字，每条独立展示
- * - 无警告时不渲染
- */
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, View } from "react-native";
 import { Surface, Text, useTheme } from "react-native-paper";
 import { toSafeStringArray } from "../../utils/safeData";
+import { MathAwareText } from "../common/MathAwareText";
 
-// ========== Props 类型定义 ==========
 interface NoteWarningsProps {
-  /** AI 处理警告信息数组 */
   warnings?: string[];
 }
 
-/**
- * NoteWarnings 组件
- * 展示 AI 处理过程中的警告信息列表
- */
 export const NoteWarnings: React.FC<NoteWarningsProps> = ({ warnings }) => {
   const { t } = useTranslation();
   const theme = useTheme();
   const safeWarnings = toSafeStringArray(warnings);
+  const warningColors = theme.dark
+    ? {
+        background: "rgba(251, 191, 36, 0.12)",
+        border: "rgba(251, 191, 36, 0.35)",
+        foreground: "#FBBF24",
+        text: theme.colors.onSurface,
+      }
+    : {
+        background: "#FFF8E1",
+        border: "#F3C969",
+        foreground: "#8A5A00",
+        text: theme.colors.onSurface,
+      };
 
-  // 无警告时不渲染
   if (safeWarnings.length === 0) return null;
 
   return (
     <Surface
       style={[
         styles.container,
-        { backgroundColor: theme.colors.errorContainer },
+        {
+          backgroundColor: warningColors.background,
+          borderColor: warningColors.border,
+        },
       ]}
       elevation={0}
     >
-      {/* 标题行 */}
       <View style={styles.titleRow}>
         <Ionicons
-          name="warning-outline"
+          name="alert-circle-outline"
           size={18}
-          color={theme.colors.onErrorContainer}
+          color={warningColors.foreground}
         />
         <Text
           variant="titleSmall"
-          style={[styles.titleText, { color: theme.colors.onErrorContainer }]}
+          style={[styles.titleText, { color: warningColors.foreground }]}
         >
           {t("noteDetail.warnings_title")}
         </Text>
       </View>
 
-      {/* 警告列表 */}
-      {safeWarnings.map((warning, index) => (
-        <View key={`warn-${index}`} style={styles.warningRow}>
-          <Text
+      <View style={styles.warningList}>
+        {safeWarnings.map((warning, index) => (
+          <MathAwareText
+            key={`warn-${index}`}
+            content={warning}
             variant="bodySmall"
-            style={{ color: theme.colors.onErrorContainer }}
-          >
-            • {warning}
-          </Text>
-        </View>
-      ))}
+            textStyle={[styles.warningText, { color: warningColors.text }]}
+            fontSize={13}
+            minHeight={28}
+            selectable
+          />
+        ))}
+      </View>
     </Surface>
   );
 };
 
-// ========== 样式定义 ==========
 const styles = StyleSheet.create({
   container: {
     marginHorizontal: 16,
-    marginTop: 12,
-    padding: 16,
+    marginTop: 18,
+    padding: 14,
     borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   titleRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 8,
+    gap: 8,
   },
   titleText: {
-    marginLeft: 8,
     fontWeight: "600",
   },
-  warningRow: {
-    marginTop: 4,
-    paddingLeft: 4,
+  warningList: {
+    marginTop: 8,
+    gap: 6,
+  },
+  warningText: {
+    lineHeight: 20,
   },
 });
 

@@ -47,6 +47,20 @@ export const toOptionalSafeStringArray = (
 };
 
 /**
+ * 将未知值安全转换为可选字符串数组，同时兼容后端偶尔返回单个字符串的场景。
+ */
+export const toOptionalSafeStringList = (
+  value: unknown,
+): string[] | undefined => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? [trimmed] : undefined;
+  }
+
+  return toOptionalSafeStringArray(value);
+};
+
+/**
  * 将未知值安全转换为章节数组
  * - 仅保留对象项
  * - heading/content 仅接受字符串

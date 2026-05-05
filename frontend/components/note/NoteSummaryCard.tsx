@@ -1,64 +1,104 @@
-/**
- * NoteSummaryCard 组件
- *
- * 职责：展示 AI 生成的笔记摘要（structured_data.summary）
- *
- * 设计说明：
- * - 使用 Card 包裹，视觉上突出摘要信息
- * - 无摘要内容时不渲染
- * - 样式与 Paper 主题保持一致
- * - 支持 LaTeX 公式渲染（通过 MathAwareText 智能检测）
- */
+import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import { useTranslation } from "react-i18next";
-import { StyleSheet } from "react-native";
-import { Card, useTheme } from "react-native-paper";
+import { StyleSheet, View } from "react-native";
+import { Surface, Text, useTheme } from "react-native-paper";
 import { MathAwareText } from "../common/MathAwareText";
 
-// ========== Props 类型定义 ==========
 interface NoteSummaryCardProps {
-  /** AI 生成的摘要文本（可能含 LaTeX） */
   summary?: string;
 }
 
-/**
- * NoteSummaryCard 组件
- * 渲染 AI 摘要区域，使用 Card 容器突出展示
- * 支持 LaTeX 公式智能检测：纯文本用 Text，含公式用 MathWebView
- */
 export const NoteSummaryCard: React.FC<NoteSummaryCardProps> = ({
   summary,
 }) => {
   const { t } = useTranslation();
   const theme = useTheme();
+  const summaryColors = theme.dark
+    ? {
+        background: "rgba(208, 188, 255, 0.11)",
+        border: "rgba(208, 188, 255, 0.38)",
+        iconBackground: "rgba(208, 188, 255, 0.18)",
+        foreground: theme.colors.primary,
+      }
+    : {
+        background: "#F8F2FF",
+        border: "#D8C8FF",
+        iconBackground: theme.colors.primaryContainer,
+        foreground: theme.colors.primary,
+      };
 
-  // 无摘要内容时不渲染
   if (!summary) return null;
 
   return (
-    <Card style={styles.card} mode="outlined">
-      <Card.Title
-        title={t("noteDetail.summary_title")}
-        titleVariant="titleSmall"
-        titleStyle={{ color: theme.colors.primary }}
-      />
-      <Card.Content>
-        {/* MathAwareText: 纯文本→Text，含公式→compact MathWebView */}
+    <Surface
+      style={[
+        styles.container,
+        {
+          backgroundColor: summaryColors.background,
+          borderColor: summaryColors.border,
+        },
+      ]}
+      elevation={0}
+    >
+      <View style={styles.headerRow}>
+        <View
+          style={[
+            styles.iconBox,
+            { backgroundColor: summaryColors.iconBackground },
+          ]}
+        >
+          <Ionicons
+            name="sparkles-outline"
+            size={18}
+            color={summaryColors.foreground}
+          />
+        </View>
+        <Text
+          variant="titleSmall"
+          style={[styles.title, { color: summaryColors.foreground }]}
+        >
+          {t("noteDetail.summary_title")}
+        </Text>
+      </View>
+
+      <View style={styles.content}>
         <MathAwareText
           content={summary}
           variant="bodyMedium"
-          textStyle={{ color: theme.colors.onSurface, lineHeight: 22 }}
+          textStyle={{ color: theme.colors.onSurface, lineHeight: 23 }}
           fontSize={15}
+          selectable
         />
-      </Card.Content>
-    </Card>
+      </View>
+    </Surface>
   );
 };
 
-// ========== 样式定义 ==========
 const styles = StyleSheet.create({
-  card: {
+  container: {
     marginHorizontal: 16,
+    marginTop: 18,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+  },
+  title: {
+    fontWeight: "700",
+  },
+  iconBox: {
+    width: 30,
+    height: 30,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  content: {
     marginTop: 12,
   },
 });

@@ -16,6 +16,7 @@ import {
 import {
   toOptionalSafeSections,
   toOptionalSafeStringArray,
+  toOptionalSafeStringList,
 } from "../utils/safeData";
 import api from "./api";
 import {
@@ -66,7 +67,7 @@ const normalizeStructuredData = (
     meta = {
       subject: data.meta.subject,
       promptProfile: data.meta.prompt_profile,
-      warnings: toOptionalSafeStringArray(data.meta.warnings),
+      warnings: toOptionalSafeStringList(data.meta.warnings),
       tags: toOptionalSafeStringArray(data.meta.tags),
       originalNoteType: data.meta.original_note_type,
       provider: data.meta.provider,

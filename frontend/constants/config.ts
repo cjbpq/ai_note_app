@@ -6,6 +6,7 @@
 export const ROUTES = {
   HOME: "(tabs)/index", // 示例：虽然 Expo Router 是基于文件的，但在做跳转时定义常量可以防手误
   LOGIN: "login",
+  CHAT: "/chat",
   NOTE_DETAIL: "/note", // 笔记详情页基础路径，使用时拼接 ID: `/note/${id}`
 };
 
@@ -45,6 +46,7 @@ export const APP_CONFIG = {
   VALIDATION: {
     USERNAME_MIN: 3,
     USERNAME_MAX: 10,
+    REGISTER_PASSWORD_MIN: 6,
     PASSWORD_MIN: 8,
     PASSWORD_MAX: 20,
     /** 邮箱验证码位数 */
@@ -121,6 +123,7 @@ export const ENDPOINTS = {
     PASSWORD_CHANGE: "/auth/password/change", // 已登录用户修改密码
     PASSWORD_RESET: "/auth/password/reset", // 忘记密码/重置密码（邮箱验证码）
     EMAIL_CHANGE: "/auth/email/change", // 修改绑定邮箱
+    PREFERENCES: "/auth/preferences",
   },
   LIBRARY: {
     UPLOAD_IMAGE: "/library/notes/from-image",
@@ -134,6 +137,15 @@ export const ENDPOINTS = {
   },
   UPLOAD: {
     GET_JOB: "/upload/jobs",
+  },
+  CHAT: {
+    STREAM: "/chat/stream",
+    CONVERSATIONS: "/chat/conversations",
+    CONVERSATION_DETAIL: (id: string) => `/chat/conversations/${id}`,
+    BATCH_DELETE_CONVERSATIONS: "/chat/conversations/batch-delete",
+    SEARCH_CONVERSATIONS: "/chat/conversations/search",
+    ACCEPT_SUGGESTION: (id: string) => `/chat/suggestions/${id}/accept`,
+    DISMISS_SUGGESTION: (id: string) => `/chat/suggestions/${id}/dismiss`,
   },
 } as const;
 

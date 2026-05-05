@@ -92,54 +92,26 @@ export default function RegisterScreen() {
     return /^\d{6}$/.test(verifyCode);
   }, [verifyCode]);
 
-  const passwordChecks = useMemo(
-    () => ({
-      minLength: password.length >= APP_CONFIG.VALIDATION.PASSWORD_MIN,
-      hasUppercase: /[A-Z]/.test(password),
-      hasLowercase: /[a-z]/.test(password),
-      hasNumber: /\d/.test(password),
-      hasSpecial: /[^A-Za-z0-9]/.test(password),
-    }),
-    [password],
-  );
+  const isPasswordLongEnough = useMemo(() => {
+    return password.length >= APP_CONFIG.VALIDATION.REGISTER_PASSWORD_MIN;
+  }, [password.length]);
 
-  const isPasswordStrong = useMemo(() => {
-    return Object.values(passwordChecks).every(Boolean);
-  }, [passwordChecks]);
+  const isPasswordValid = useMemo(() => {
+    return (
+      isPasswordLongEnough &&
+      password.length <= APP_CONFIG.VALIDATION.PASSWORD_MAX
+    );
+  }, [isPasswordLongEnough, password.length]);
 
   const isConfirmPasswordMatched = useMemo(() => {
     if (!confirmPassword) return false;
     return confirmPassword === password;
   }, [confirmPassword, password]);
 
-  /** 密码规则中未满足的条目（用于展示提示） */
-  const missingPasswordRules = useMemo(() => {
-    const missing: string[] = [];
-    if (!passwordChecks.minLength) {
-      missing.push(
-        t("auth.validation.password_rule_min", {
-          min: APP_CONFIG.VALIDATION.PASSWORD_MIN,
-        }),
-      );
-    }
-    if (!passwordChecks.hasUppercase) {
-      missing.push(t("auth.validation.password_rule_uppercase"));
-    }
-    if (!passwordChecks.hasLowercase) {
-      missing.push(t("auth.validation.password_rule_lowercase"));
-    }
-    if (!passwordChecks.hasNumber) {
-      missing.push(t("auth.validation.password_rule_number"));
-    }
-    if (!passwordChecks.hasSpecial) {
-      missing.push(t("auth.validation.password_rule_special"));
-    }
-    return missing;
-  }, [passwordChecks, t]);
-
-  const shouldShowPasswordRules = useMemo(() => {
-    return password.length > 0 && !isPasswordStrong;
-  }, [password.length, isPasswordStrong]);
+  /** 注册密码只校验长度，避免移动端输入成本过高 */
+  const shouldShowPasswordMinError = useMemo(() => {
+    return password.length > 0 && !isPasswordLongEnough;
+  }, [password.length, isPasswordLongEnough]);
 
   const shouldShowConfirmPasswordError = useMemo(() => {
     if (!confirmPassword) return false;
@@ -158,8 +130,7 @@ export default function RegisterScreen() {
       return true;
     if (username.length < APP_CONFIG.VALIDATION.USERNAME_MIN) return true;
     if (username.length > APP_CONFIG.VALIDATION.USERNAME_MAX) return true;
-    if (password.length > APP_CONFIG.VALIDATION.PASSWORD_MAX) return true;
-    if (!isPasswordStrong) return true;
+    if (!isPasswordValid) return true;
     if (!isEmailValid) return true;
     if (!isCodeValid) return true;
     if (!isConfirmPasswordMatched) return true;
@@ -170,7 +141,7 @@ export default function RegisterScreen() {
     password,
     confirmPassword,
     verifyCode,
-    isPasswordStrong,
+    isPasswordValid,
     isEmailValid,
     isCodeValid,
     isConfirmPasswordMatched,
@@ -344,7 +315,7 @@ export default function RegisterScreen() {
             keyboardType="default"
             style={styles.input}
             error={
-              (password.length > 0 && !isPasswordStrong) ||
+              shouldShowPasswordMinError ||
               password.length > APP_CONFIG.VALIDATION.PASSWORD_MAX ||
               (regError instanceof ServiceError &&
                 !!regError.fieldErrors?.password)
@@ -357,10 +328,11 @@ export default function RegisterScreen() {
               />
             }
           />
-          {shouldShowPasswordRules ? (
+          {shouldShowPasswordMinError ? (
             <HelperText type="error" visible>
-              {t("auth.validation.password_rules_title")}
-              {missingPasswordRules.join("、")}
+              {t("auth.validation.password_rule_min", {
+                min: APP_CONFIG.VALIDATION.REGISTER_PASSWORD_MIN,
+              })}
             </HelperText>
           ) : null}
           {password.length > APP_CONFIG.VALIDATION.PASSWORD_MAX ? (
