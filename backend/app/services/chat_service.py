@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Literal, Optional
 
@@ -554,6 +555,73 @@ class ChatService:
             )
         return None
 
+    def get_suggestions_by_message_ids(
+        self,
+        *,
+        user_id: str,
+        message_ids: Iterable[str],
+    ) -> Dict[str, List[ChatNoteSuggestion]]:
+        normalized_ids = [str(message_id) for message_id in message_ids if message_id]
+        if not normalized_ids:
+            return {}
+
+        rows = (
+            self.db.query(ChatNoteSuggestion)
+            .filter(
+                ChatNoteSuggestion.user_id == user_id,
+                ChatNoteSuggestion.message_id.in_(normalized_ids),
+            )
+            .order_by(ChatNoteSuggestion.created_at.asc())
+            .all()
+        )
+        grouped: Dict[str, List[ChatNoteSuggestion]] = {}
+        for suggestion in rows:
+            if not suggestion.message_id:
+                continue
+            grouped.setdefault(str(suggestion.message_id), []).append(suggestion)
+        return grouped
+
+    def ensure_suggestions_for_messages(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        messages: Iterable[ChatMessage],
+    ) -> Dict[str, List[ChatNoteSuggestion]]:
+        materialized_messages = list(messages)
+        suggestions_by_message_id = self.get_suggestions_by_message_ids(
+            user_id=user_id,
+            message_ids=[str(message.id) for message in materialized_messages],
+        )
+
+        for message in materialized_messages:
+            message_id = str(message.id)
+            if message.role != "assistant" or suggestions_by_message_id.get(message_id):
+                continue
+
+            metadata = message.message_metadata or {}
+            if not isinstance(metadata, dict):
+                continue
+            raw_tool_calls = metadata.get("tool_calls")
+            if isinstance(raw_tool_calls, dict):
+                tool_calls = [raw_tool_calls]
+            elif isinstance(raw_tool_calls, list):
+                tool_calls = raw_tool_calls
+            else:
+                continue
+
+            suggestion = self.create_note_suggestion_from_tool_calls(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                message_id=message_id,
+                tool_calls=tool_calls,
+                source_message=message.content,
+            )
+            if suggestion:
+                suggestions_by_message_id.setdefault(message_id, []).append(suggestion)
+
+        return suggestions_by_message_id
+
     def get_suggestion(self, *, user_id: str, suggestion_id: str) -> Optional[ChatNoteSuggestion]:
         return (
             self.db.query(ChatNoteSuggestion)
@@ -628,7 +696,10 @@ class ChatService:
         }
 
     @staticmethod
-    def serialize_message(message: ChatMessage) -> Dict[str, Any]:
+    def serialize_message(
+        message: ChatMessage,
+        suggestions: Optional[Iterable[ChatNoteSuggestion]] = None,
+    ) -> Dict[str, Any]:
         return {
             "id": message.id,
             "conversation_id": message.conversation_id,
@@ -636,6 +707,10 @@ class ChatService:
             "content": message.content,
             "sequence": message.sequence,
             "metadata": message.message_metadata or {},
+            "suggestions": [
+                ChatService.serialize_suggestion(suggestion)
+                for suggestion in suggestions or []
+            ],
             "created_at": message.created_at,
         }
 
@@ -980,10 +1055,9 @@ class ChatService:
         if function.get("name") != NOTE_SUGGESTION_TOOL_NAME:
             return None
 
-        raw_arguments = function.get("arguments") or "{}"
-        try:
-            arguments = json.loads(raw_arguments)
-        except (TypeError, json.JSONDecodeError):
+        raw_arguments = function.get("arguments") or {}
+        arguments = cls._decode_tool_arguments(raw_arguments)
+        if arguments is None:
             logger.warning("Invalid propose_note tool arguments: %s", raw_arguments)
             return None
         if not isinstance(arguments, dict):
@@ -1003,3 +1077,88 @@ class ChatService:
             "reason": reason,
             "tags": tags,
         }
+
+    @classmethod
+    def _decode_tool_arguments(cls, raw_arguments: Any) -> Optional[Dict[str, Any]]:
+        if isinstance(raw_arguments, dict):
+            return raw_arguments
+        if raw_arguments is None:
+            return {}
+        if not isinstance(raw_arguments, str):
+            return None
+
+        raw_text = raw_arguments.strip()
+        if not raw_text:
+            return {}
+
+        candidates = [raw_text]
+        cleaned = cls._extract_json_object(raw_text)
+        if cleaned != raw_text:
+            candidates.append(cleaned)
+        repaired = cls._repair_json_object(cleaned)
+        if repaired not in candidates:
+            candidates.append(repaired)
+
+        for candidate in candidates:
+            try:
+                decoded = json.loads(candidate)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if isinstance(decoded, dict):
+                return decoded
+            return None
+        return None
+
+    @staticmethod
+    def _extract_json_object(text: str) -> str:
+        json_block = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
+        if json_block:
+            text = json_block.group(1).strip()
+
+        first_brace = text.find("{")
+        last_brace = text.rfind("}")
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+            return text[first_brace : last_brace + 1].strip()
+        return text.strip()
+
+    @classmethod
+    def _repair_json_object(cls, text: str) -> str:
+        repaired = re.sub(r",\s*([\]}])", r"\1", text.strip())
+        repaired = re.sub(r"\\(?![\"\\/bfnrtu])", r"\\\\", repaired)
+        return cls._escape_control_chars_in_json_strings(repaired)
+
+    @staticmethod
+    def _escape_control_chars_in_json_strings(text: str) -> str:
+        chars: List[str] = []
+        in_string = False
+        escaped = False
+        for char in text:
+            if not in_string:
+                chars.append(char)
+                if char == '"':
+                    in_string = True
+                continue
+
+            if escaped:
+                chars.append(char)
+                escaped = False
+                continue
+            if char == "\\":
+                chars.append(char)
+                escaped = True
+                continue
+            if char == '"':
+                chars.append(char)
+                in_string = False
+                continue
+            if char == "\n":
+                chars.append("\\n")
+                continue
+            if char == "\r":
+                chars.append("\\r")
+                continue
+            if char == "\t":
+                chars.append("\\t")
+                continue
+            chars.append(char)
+        return "".join(chars)

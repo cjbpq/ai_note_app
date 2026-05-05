@@ -236,6 +236,39 @@ def test_doubao_stream_chat_sends_tools_and_accumulates_streaming_tool_calls():
     assert request_kwargs["stream_options"] == {"include_usage": True}
 
 
+def test_chat_service_parses_dict_and_repaired_tool_arguments():
+    dict_payload = ChatService._parse_note_suggestion_tool_call(
+        {
+            "function": {
+                "name": "propose_note",
+                "arguments": {
+                    "title": "Direct args",
+                    "content": "Arguments can already be decoded.",
+                    "reason": None,
+                    "tags": ["api"],
+                },
+            }
+        }
+    )
+    assert dict_payload["title"] == "Direct args"
+    assert dict_payload["tags"] == ["api"]
+
+    repaired_payload = ChatService._parse_note_suggestion_tool_call(
+        {
+            "function": {
+                "name": "propose_note",
+                "arguments": (
+                    '{"title":"Repaired args","content":"Line one\nLine two",'
+                    '"reason":null,"tags":["json",],}'
+                ),
+            }
+        }
+    )
+    assert repaired_payload["title"] == "Repaired args"
+    assert repaired_payload["content"] == "Line one Line two"
+    assert repaired_payload["tags"] == ["json"]
+
+
 @pytest.mark.unit
 def test_doubao_stream_chat_emits_normalized_cached_usage():
     from app.services.doubao_chat_service import DoubaoChatService
@@ -1017,6 +1050,84 @@ def test_chat_stream_model_tool_call_creates_note_suggestion_for_unmatched_messa
     assert suggestion_events[0]["metadata"]["source"] == "propose_note_tool_call"
     assert done_events[0]["suggestion_id"] == suggestion_events[0]["id"]
     assert fake_model.stream_calls[0]["kwargs"]["tools"][0]["function"]["name"] == "propose_note"
+
+
+@pytest.mark.integration
+def test_conversation_detail_returns_and_backfills_assistant_suggestions(test_client):
+    from app.models.chat import ChatNoteSuggestion
+
+    user_id, token = _register_and_login(test_client)
+    headers = {"Authorization": f"Bearer {token}"}
+    tool_call = {
+        "index": 0,
+        "id": "legacy_call_1",
+        "type": "function",
+        "function": {
+            "name": "propose_note",
+            "arguments": (
+                '{"title":"Pomodoro","content":"Work 25 minutes, then rest 5.",'
+                '"reason":null,"tags":["productivity",],}'
+            ),
+        },
+    }
+
+    with SessionLocal() as session:
+        service = ChatService(session, model_service=FakeChatModel())
+        conversation = service.get_or_create_conversation(
+            user_id=user_id,
+            conversation_id=None,
+            first_message="Remember this productivity method.",
+        )
+        service.add_message(
+            user_id=user_id,
+            conversation_id=conversation.id,
+            role="user",
+            content="Remember this productivity method.",
+        )
+        assistant = service.add_message(
+            user_id=user_id,
+            conversation_id=conversation.id,
+            role="assistant",
+            content="The Pomodoro method can be saved.",
+            metadata={"tool_calls": [tool_call]},
+        )
+        conversation_id = conversation.id
+        assistant_message_id = assistant.id
+
+    detail_resp = test_client.get(
+        f"/api/v1/chat/conversations/{conversation_id}",
+        headers=headers,
+    )
+    assert detail_resp.status_code == 200
+    assistant_payload = next(
+        message for message in detail_resp.json()["messages"] if message["id"] == assistant_message_id
+    )
+    assert assistant_payload["suggestions"][0]["title"] == "Pomodoro"
+    assert assistant_payload["suggestions"][0]["content"] == "Work 25 minutes, then rest 5."
+    assert assistant_payload["suggestions"][0]["tags"] == ["productivity"]
+    assert assistant_payload["suggestions"][0]["status"] == "pending"
+    assert assistant_payload["suggestions"][0]["note_id"] is None
+
+    with SessionLocal() as session:
+        assert (
+            session.query(ChatNoteSuggestion)
+            .filter(ChatNoteSuggestion.message_id == assistant_message_id)
+            .count()
+            == 1
+        )
+
+    second_detail_resp = test_client.get(
+        f"/api/v1/chat/conversations/{conversation_id}",
+        headers=headers,
+    )
+    assert second_detail_resp.status_code == 200
+    with SessionLocal() as session:
+        assert (
+            session.query(ChatNoteSuggestion)
+            .filter(ChatNoteSuggestion.message_id == assistant_message_id)
+            .count()
+            == 1
+        )
 
 
 @pytest.mark.integration
