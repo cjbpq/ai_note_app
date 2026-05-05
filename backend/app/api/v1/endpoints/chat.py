@@ -22,6 +22,7 @@ from app.schemas.chat import (
     ChatIndexRebuildResponse,
     ChatMessageResponse,
     ChatNoteSuggestionResponse,
+    ChatSuggestionAcceptRequest,
     ChatStreamRequest,
     ChatSuggestionAcceptResponse,
 )
@@ -29,6 +30,7 @@ from app.services.chat_service import (
     ChatAccessError,
     ChatNotFoundError,
     ChatService,
+    ToolCallLoopGuard,
     classify_chat_intent,
     should_enable_note_suggestion_tool,
 )
@@ -37,6 +39,7 @@ from app.services.note_index_service import NoteIndexService
 from app.services.nexoradb_service import NexoraDBError
 
 router = APIRouter()
+ASSISTANT_TEXT_FALLBACK = "工具调用已完成，但模型没有返回可展示的文字回复。"
 
 
 def _sse(event: str, data: dict) -> str:
@@ -46,6 +49,24 @@ def _sse(event: str, data: dict) -> str:
 
 def _heartbeat() -> str:
     return ": heartbeat\n\n"
+
+
+def _stream_event_parts(payload: object) -> tuple[str, str, dict | None]:
+    kind = getattr(payload, "kind", None)
+    if kind:
+        return str(kind), str(getattr(payload, "text", "") or ""), getattr(payload, "data", None)
+
+    return "text_delta", str(payload or ""), None
+
+
+def _tool_call_sse_payload(service: ChatService, tool_call: dict) -> dict:
+    return {
+        "id": tool_call.get("id"),
+        "call_id": tool_call.get("id"),
+        "index": tool_call.get("index"),
+        "name": service._tool_call_name(tool_call),  # noqa: SLF001 - endpoint serializes model tool events.
+        "arguments": service._parse_tool_call_arguments(tool_call) or {},  # noqa: SLF001
+    }
 
 
 def _conversation_response(service: ChatService, conversation) -> ChatConversationResponse:
@@ -132,7 +153,11 @@ async def stream_chat(
                 },
             )
 
-            note_tool_enabled = should_enable_note_suggestion_tool(intent=intent, references=references)
+            note_tool_enabled = should_enable_note_suggestion_tool(
+                intent=intent,
+                references=references,
+                message_length=len(body.message),
+            )
             model_messages = service.build_model_messages(
                 user_id=current_user.id,
                 conversation_id=conversation.id,
@@ -141,8 +166,9 @@ async def stream_chat(
                 note_tool_enabled=note_tool_enabled,
             )
             note_tools = service.build_note_suggestion_tools() if note_tool_enabled else None
-            model_tool_calls = []
             usage_payload = None
+            all_tool_calls = []
+            loop_guard = ToolCallLoopGuard()
 
             def stream_worker(messages_for_model, event_queue: queue.Queue[tuple[str, object]]) -> None:
                 try:
@@ -158,7 +184,9 @@ async def stream_chat(
             context_retry_count = 0
             max_context_retries = 1
 
-            while True:
+            for round_num in range(1, loop_guard.max_rounds + 1):
+                round_text = ""
+                round_tool_calls = []
                 model_events: queue.Queue[tuple[str, object]] = queue.Queue()
                 worker_thread = threading.Thread(
                     target=stream_worker,
@@ -187,6 +215,7 @@ async def stream_chat(
                             and context_retry_count < max_context_retries
                             and not assistant_text
                             and not reasoning_text
+                            and not all_tool_calls
                         ):
                             context_retry_count += 1
                             model_messages = service.build_model_messages(
@@ -202,40 +231,86 @@ async def stream_chat(
                             break
                         raise payload
 
-                    if isinstance(payload, dict):
-                        payload_type = payload.get("type")
-                        if payload_type == "tool_calls":
-                            model_tool_calls.extend(payload.get("tool_calls") or [])
-                            continue
-                        if payload_type == "usage":
-                            usage_payload = payload.get("usage") or {}
-                            yield _sse("usage", usage_payload)
-                            continue
-                        if payload_type == "reasoning_delta":
-                            delta = str(payload.get("delta") or payload.get("content") or "")
-                            if delta:
-                                reasoning_text += delta
-                                yield _sse("reasoning_delta", {"delta": delta})
-                            continue
-                        delta = str(payload.get("delta") or payload.get("content") or "")
-                    else:
-                        delta = str(payload or "")
-                    if not delta:
+                    kind, text, data = _stream_event_parts(payload)
+                    if kind == "tool_call":
+                        tool_call = data or {}
+                        if isinstance(tool_call, dict):
+                            round_tool_calls.append(tool_call)
+                            yield _sse("tool_call", _tool_call_sse_payload(service, tool_call))
                         continue
-                    assistant_text += delta
-                    yield _sse("delta", {"delta": delta})
+                    if kind == "usage":
+                        usage_payload = data or {}
+                        yield _sse("usage", usage_payload)
+                        continue
+                    if kind == "reasoning_delta":
+                        if text:
+                            reasoning_text += text
+                            yield _sse("reasoning_delta", {"delta": text})
+                        continue
+                    if kind == "text_delta" and text:
+                        round_text += text
+                        assistant_text += text
+                        yield _sse("delta", {"delta": text})
                 if retry_after_context_error:
                     worker_thread.join(timeout=1.0)
                     continue
-                break
+
+                worker_thread.join(timeout=1.0)
+                if not round_tool_calls:
+                    break
+
+                all_tool_calls.extend(round_tool_calls)
+                guard_reason = loop_guard.check(
+                    round_num=round_num,
+                    has_text=bool(round_text.strip()),
+                    tool_calls=round_tool_calls,
+                )
+                if guard_reason:
+                    yield _sse("tool_loop_guard", {"reason": guard_reason})
+                    break
+
+                model_messages.append(
+                    {
+                        "role": "assistant",
+                        "content": round_text or None,
+                        "tool_calls": round_tool_calls,
+                    }
+                )
+                for tool_call in round_tool_calls:
+                    result = service.execute_note_suggestion_tool(
+                        user_id=current_user.id,
+                        conversation_id=conversation.id,
+                        tool_call=tool_call,
+                        source_message=body.message,
+                    )
+                    result_payload = result.as_dict()
+                    yield _sse(
+                        "tool_result",
+                        {
+                            "call_id": tool_call.get("id"),
+                            "name": service._tool_call_name(tool_call),  # noqa: SLF001
+                            **result_payload,
+                        },
+                    )
+                    model_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.get("id"),
+                            "content": json.dumps(result_payload, ensure_ascii=False, default=str),
+                        }
+                    )
+            else:
+                yield _sse("tool_loop_guard", {"reason": "max_rounds"})
 
             assistant_metadata = {"intent": intent, "references": public_refs}
             if reasoning_text:
                 assistant_metadata["reasoning_content"] = reasoning_text
             if usage_payload:
                 assistant_metadata["usage"] = usage_payload
-            if model_tool_calls:
-                assistant_metadata["tool_calls"] = model_tool_calls
+            if all_tool_calls:
+                assistant_metadata["tool_calls"] = all_tool_calls
+            if not assistant_text.strip():
+                assistant_text = ASSISTANT_TEXT_FALLBACK
             assistant_message = service.add_message(
                 user_id=current_user.id,
                 conversation_id=conversation.id,
@@ -244,35 +319,31 @@ async def stream_chat(
                 metadata=assistant_metadata,
             )
 
-            suggestion_payload = None
-            if intent == "out_of_scope_note_worthy" and not model_tool_calls:
-                suggestion = service.create_note_suggestion(
-                    user_id=current_user.id,
-                    conversation_id=conversation.id,
-                    message_id=assistant_message.id,
-                    source_message=body.message,
-                    metadata={"source": "intent_classifier"},
-                )
-                suggestion_payload = service.serialize_suggestion(suggestion)
-                yield _sse("note_suggestion", suggestion_payload)
-            elif model_tool_calls:
-                suggestion = service.create_note_suggestion_from_tool_calls(
-                    user_id=current_user.id,
-                    conversation_id=conversation.id,
-                    message_id=assistant_message.id,
-                    tool_calls=model_tool_calls,
-                    source_message=body.message,
-                )
-                if suggestion:
-                    suggestion_payload = service.serialize_suggestion(suggestion)
-                    yield _sse("note_suggestion", suggestion_payload)
+            suggestion_payloads = []
+            suggestions_for_this_turn = service.get_suggestions_by_tool_call_ids(
+                user_id=current_user.id,
+                conversation_id=conversation.id,
+                tool_call_ids=[tool_call.get("id") for tool_call in all_tool_calls],
+            )
+            for suggestion in suggestions_for_this_turn:
+                suggestion.message_id = assistant_message.id
+                service.db.add(suggestion)
+            if suggestions_for_this_turn:
+                service.db.commit()
+                for suggestion in suggestions_for_this_turn:
+                    service.db.refresh(suggestion)
+                    payload = service.serialize_suggestion(suggestion)
+                    suggestion_payloads.append(payload)
+                    yield _sse("note_suggestion", payload)
 
             done_payload = {
                 "conversation_id": conversation.id,
                 "message_id": assistant_message.id if assistant_message else None,
-                "suggestion_id": suggestion_payload.get("id") if suggestion_payload else None,
+                "suggestion_id": suggestion_payloads[0].get("id") if suggestion_payloads else None,
                 "reasoning_content": reasoning_text or None,
             }
+            if len(suggestion_payloads) > 1:
+                done_payload["suggestion_ids"] = [item.get("id") for item in suggestion_payloads]
             if usage_payload:
                 done_payload["usage"] = usage_payload
             yield _sse("done", done_payload)
@@ -433,12 +504,17 @@ async def fork_conversation(
 )
 async def accept_suggestion(
     suggestion_id: uuid.UUID,
+    body: ChatSuggestionAcceptRequest | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     service = ChatService(db)
     try:
-        suggestion = service.accept_suggestion(user_id=current_user.id, suggestion_id=str(suggestion_id))
+        suggestion = service.accept_suggestion(
+            user_id=current_user.id,
+            suggestion_id=str(suggestion_id),
+            category=body.category if body else None,
+        )
     except ChatNotFoundError as exc:
         raise HTTPException(status_code=404, detail="建议不存在") from exc
     except ChatAccessError as exc:
