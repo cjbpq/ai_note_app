@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Union
+from dataclasses import dataclass
+from typing import Any, Dict, Iterator, List, Optional, Union
 
 from app.core.config import settings
 from app.services.doubao_service import DoubaoServiceError, doubao_service
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class StreamEvent:
+    kind: str
+    text: str = ""
+    data: Optional[Dict[str, Any]] = None
 
 
 class DoubaoChatService:
@@ -22,7 +30,62 @@ class DoubaoChatService:
         tools: Optional[List[Dict[str, Any]]] = None,
         tool_choice: Union[str, Dict[str, Any], None] = "auto",
         thinking_enabled: bool = False,
-    ) -> Iterator[Union[str, Dict[str, Any]]]:
+    ) -> Iterator[StreamEvent]:
+        try:
+            yield from self._iter_stream_events(
+                messages,
+                tools=tools,
+                tool_choice=tool_choice,
+                thinking_enabled=thinking_enabled,
+            )
+        except DoubaoServiceError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Doubao chat stream failed")
+            raise DoubaoServiceError(str(exc)) from exc
+
+    def _iter_stream_events(
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Union[str, Dict[str, Any], None] = "auto",
+        thinking_enabled: bool = False,
+    ) -> Iterator[StreamEvent]:
+        chunks = self._create_stream(
+            messages,
+            tools=tools,
+            tool_choice=tool_choice,
+            thinking_enabled=thinking_enabled,
+        )
+        tool_call_chunks: Dict[int, Dict[str, Any]] = {}
+        for chunk in chunks:
+            usage = self._extract_usage(chunk)
+            if usage:
+                yield StreamEvent(kind="usage", data=self._normalize_usage(usage))
+
+            reasoning_delta = self._extract_reasoning_delta(chunk)
+            if reasoning_delta:
+                yield StreamEvent(kind="reasoning_delta", text=reasoning_delta)
+
+            delta = self._extract_delta(chunk)
+            if delta:
+                yield StreamEvent(kind="text_delta", text=delta)
+
+            for tool_call_chunk in self._extract_tool_call_chunks(chunk):
+                self._accumulate_tool_call_chunk(tool_call_chunks, tool_call_chunk)
+
+        for tool_call in self._finalize_tool_calls(tool_call_chunks):
+            yield StreamEvent(kind="tool_call", data=tool_call)
+
+    def _create_stream(
+        self,
+        messages: List[Dict[str, Any]],
+        *,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Union[str, Dict[str, Any], None] = "auto",
+        thinking_enabled: bool = False,
+    ) -> Any:
         client = self._vision_service._ensure_client()  # noqa: SLF001 - reuse existing configured Ark client.
         request_kwargs: Dict[str, Any] = {
             "model": settings.DOUBAO_MODEL_ID,
@@ -38,32 +101,7 @@ class DoubaoChatService:
         if settings.DOUBAO_MAX_COMPLETION_TOKENS:
             request_kwargs["max_tokens"] = settings.DOUBAO_MAX_COMPLETION_TOKENS
 
-        try:
-            chunks = client.chat.completions.create(**request_kwargs)
-            tool_call_chunks: Dict[int, Dict[str, Any]] = {}
-            final_usage: Optional[Dict[str, Any]] = None
-            for chunk in chunks:
-                usage = self._extract_usage(chunk)
-                if usage:
-                    final_usage = usage
-                reasoning_delta = self._extract_reasoning_delta(chunk)
-                if reasoning_delta:
-                    yield {"type": "reasoning_delta", "delta": reasoning_delta}
-                delta = self._extract_delta(chunk)
-                if delta:
-                    yield delta
-                for tool_call_chunk in self._extract_tool_call_chunks(chunk):
-                    self._accumulate_tool_call_chunk(tool_call_chunks, tool_call_chunk)
-            tool_calls = self._finalize_tool_calls(tool_call_chunks)
-            if tool_calls:
-                yield {"type": "tool_calls", "tool_calls": tool_calls}
-            if final_usage:
-                yield {"type": "usage", "usage": self._normalize_usage(final_usage)}
-        except DoubaoServiceError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Doubao chat stream failed")
-            raise DoubaoServiceError(str(exc)) from exc
+        return client.chat.completions.create(**request_kwargs)
 
     def complete_chat(self, messages: List[Dict[str, Any]], *, max_tokens: Optional[int] = None) -> str:
         client = self._vision_service._ensure_client()  # noqa: SLF001

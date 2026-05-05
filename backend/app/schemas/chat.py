@@ -84,6 +84,14 @@ class ChatConversationForkRequest(BaseModel):
     from_message_id: uuid.UUID
 
 
+class ChatSuggestionAcceptRequest(BaseModel):
+    category: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="用户确认生成笔记时选择的目标分类；为空则使用建议默认分类。",
+    )
+
+
 class ChatSuggestionAcceptResponse(BaseModel):
     suggestion: ChatNoteSuggestionResponse
     note_id: uuid.UUID

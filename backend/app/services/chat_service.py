@@ -3,10 +3,13 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Literal, Optional
 
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -22,6 +25,40 @@ ChatIntent = Literal["chat", "note_question", "out_of_scope_note_worthy"]
 NOTE_SUGGESTION_TOOL_NAME = "propose_note"
 TOKEN_ESTIMATE_CHARS_PER_TOKEN = 2
 CONTEXT_SAFETY_MARGIN_TOKENS = 1024
+NOTE_WORTHY_MARKERS = (
+    "记住",
+    "记录一下",
+    "帮我记录",
+    "保存一下",
+    "添加到笔记",
+    "加入笔记",
+    "存成笔记",
+    "补充到笔记",
+    "保存到笔记",
+    "写进笔记",
+    "放到笔记",
+    "沉淀到笔记",
+    "沉淀为笔记",
+    "整理成笔记",
+    "生成笔记",
+    "转成笔记",
+    "做成笔记",
+    "变成笔记",
+    "形成笔记",
+    "沉淀到知识库",
+    "沉淀到我的知识库",
+    "写入知识库",
+    "加入知识库",
+    "保存到知识库",
+)
+SUBJECT_CATEGORY_MARKERS = (
+    ("物理", ("物理", "电磁", "力学", "热学", "光学", "量子")),
+    ("数学", ("数学", "函数", "极限", "导数", "积分", "线代", "概率", "几何")),
+    ("英语", ("英语", "单词", "语法", "阅读", "写作", "听力")),
+    ("语文", ("语文", "文言文", "古诗", "作文", "阅读理解")),
+    ("化学", ("化学", "反应", "方程式", "有机", "无机")),
+    ("生物", ("生物", "细胞", "遗传", "生态", "代谢")),
+)
 
 
 class ChatNotFoundError(LookupError):
@@ -32,23 +69,109 @@ class ChatAccessError(PermissionError):
     pass
 
 
+@dataclass
+class ToolCallResult:
+    kind: Literal["suggestion_created", "invalid_args", "error"]
+    suggestion: Optional[ChatNoteSuggestion] = None
+    message: str = ""
+
+    def as_dict(self) -> Dict[str, Any]:
+        if self.kind == "suggestion_created" and self.suggestion is not None:
+            return {
+                "status": "ok",
+                "suggestion_id": str(self.suggestion.id),
+                "title": self.suggestion.title,
+                "message": "笔记建议已生成，等待用户确认。",
+            }
+        if self.kind == "invalid_args":
+            return {
+                "status": "invalid_args",
+                "message": self.message or "工具参数不完整或格式错误，请修正后重试。",
+            }
+        return {
+            "status": "error",
+            "message": self.message or "工具执行失败，请告知用户稍后重试。",
+        }
+
+
+class ToolCallLoopGuard:
+    """Prevents runaway model-tool feedback loops."""
+
+    def __init__(
+        self,
+        *,
+        max_rounds: int = 5,
+        max_consecutive_tool_rounds: int = 3,
+        repeat_signature_limit: int = 3,
+        timeout_seconds: int = 120,
+    ) -> None:
+        self.max_rounds = max_rounds
+        self.max_consecutive_tool_rounds = max_consecutive_tool_rounds
+        self.repeat_signature_limit = repeat_signature_limit
+        self.timeout_seconds = timeout_seconds
+        self.consecutive_tool_only_rounds = 0
+        self.last_tool_signature = ""
+        self.repeat_count = 0
+        self.started_at = time.time()
+
+    def check(self, *, round_num: int, has_text: bool, tool_calls: List[Dict[str, Any]]) -> Optional[str]:
+        if round_num >= self.max_rounds:
+            return "max_rounds"
+
+        tool_signature = self._signature(tool_calls)
+        if not has_text and tool_calls:
+            self.consecutive_tool_only_rounds += 1
+        else:
+            self.consecutive_tool_only_rounds = 0
+
+        if tool_signature and tool_signature == self.last_tool_signature:
+            self.repeat_count += 1
+        else:
+            self.repeat_count = 1 if tool_signature else 0
+        self.last_tool_signature = tool_signature
+
+        if self.consecutive_tool_only_rounds >= self.max_consecutive_tool_rounds:
+            return "consecutive_tool_only"
+        if self.repeat_count >= self.repeat_signature_limit:
+            return "repeat_signature"
+        if time.time() - self.started_at > self.timeout_seconds:
+            return "timeout"
+        return None
+
+    @staticmethod
+    def _signature(tool_calls: List[Dict[str, Any]]) -> str:
+        parts = []
+        for tool_call in tool_calls:
+            if not isinstance(tool_call, dict):
+                continue
+            function = tool_call.get("function") or {}
+            if not isinstance(function, dict):
+                function = {}
+            parts.append(
+                json.dumps(
+                    {
+                        "name": function.get("name") or tool_call.get("name") or tool_call.get("tool"),
+                        "arguments": function.get("arguments")
+                        if "arguments" in function
+                        else tool_call.get("arguments") or tool_call.get("parameters"),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    default=str,
+                )
+            )
+        return "|".join(parts)
+
+
 def classify_chat_intent(message: str) -> ChatIntent:
     text = " ".join(str(message or "").strip().split())
     lower = text.lower()
     if not text:
         return "chat"
 
-    note_worthy_markers = (
-        "记住",
-        "记录一下",
-        "帮我记录",
-        "保存一下",
-        "添加到笔记",
-        "加入笔记",
-        "存成笔记",
-        "补充到笔记",
-    )
-    if any(marker in text for marker in note_worthy_markers):
+    if any(marker in text for marker in NOTE_WORTHY_MARKERS):
+        return "out_of_scope_note_worthy"
+    if "笔记" in text and any(marker in text for marker in ("帮我做", "做一篇", "写一篇", "生成", "整理", "沉淀", "知识库", "tool_calling")):
         return "out_of_scope_note_worthy"
 
     question_markers = (
@@ -92,11 +215,13 @@ def classify_chat_intent(message: str) -> ChatIntent:
     return "chat"
 
 
-def should_enable_note_suggestion_tool(*, intent: ChatIntent, references: List[Dict[str, Any]]) -> bool:
-    if intent == "out_of_scope_note_worthy":
-        return True
-    if references:
-        return False
+def should_enable_note_suggestion_tool(
+    *,
+    intent: ChatIntent,
+    references: List[Dict[str, Any]],
+    message_length: Optional[int] = None,
+) -> bool:
+    _ = (intent, references, message_length)
     return True
 
 
@@ -196,39 +321,49 @@ class ChatService:
         content: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> ChatMessage:
-        conversation = (
-            self.db.query(ChatConversation)
-            .filter(
-                ChatConversation.id == str(conversation_id),
-                ChatConversation.user_id == user_id,
-                ChatConversation.is_deleted.is_(False),
+        last_error: Optional[IntegrityError] = None
+        for _attempt in range(3):
+            conversation = (
+                self.db.query(ChatConversation)
+                .filter(
+                    ChatConversation.id == str(conversation_id),
+                    ChatConversation.user_id == user_id,
+                    ChatConversation.is_deleted.is_(False),
+                )
+                .first()
             )
-            .with_for_update()
-            .first()
-        )
-        if conversation is None:
-            raise ChatNotFoundError("conversation not found")
+            if conversation is None:
+                raise ChatNotFoundError("conversation not found")
 
-        max_sequence = (
-            self.db.query(func.max(ChatMessage.sequence))
-            .filter(ChatMessage.conversation_id == str(conversation_id))
-            .scalar()
-        )
-        message = ChatMessage(
-            conversation_id=str(conversation_id),
-            user_id=user_id,
-            role=role,
-            content=content,
-            sequence=int(max_sequence or 0) + 1,
-            message_metadata=metadata or {},
-            created_at=datetime.now(timezone.utc),
-        )
-        conversation.updated_at = datetime.now(timezone.utc)
-        self.db.add(message)
-        self.db.add(conversation)
-        self.db.commit()
-        self.db.refresh(message)
-        return message
+            max_sequence = (
+                self.db.query(func.max(ChatMessage.sequence))
+                .filter(ChatMessage.conversation_id == str(conversation_id))
+                .scalar()
+            )
+            message = ChatMessage(
+                conversation_id=str(conversation_id),
+                user_id=user_id,
+                role=role,
+                content=content,
+                sequence=int(max_sequence or 0) + 1,
+                message_metadata=metadata or {},
+                created_at=datetime.now(timezone.utc),
+            )
+            conversation.updated_at = datetime.now(timezone.utc)
+            self.db.add(message)
+            self.db.add(conversation)
+            try:
+                self.db.commit()
+            except IntegrityError as exc:
+                self.db.rollback()
+                last_error = exc
+                continue
+            self.db.refresh(message)
+            return message
+
+        if last_error is not None:
+            raise last_error
+        raise ChatAccessError("failed to persist message")
 
     def soft_delete_conversation(self, *, user_id: str, conversation_id: str) -> bool:
         conversation = self.get_conversation(user_id=user_id, conversation_id=conversation_id)
@@ -448,35 +583,37 @@ class ChatService:
                 "function": {
                     "name": NOTE_SUGGESTION_TOOL_NAME,
                     "description": (
-                        "创建一条待用户确认的学习笔记建议。仅当本轮用户输入或助手回答中包含明确、"
-                        "可独立保存的学习内容、概念、方法、结论或复习材料时调用；普通寒暄、内容不足、"
-                        "用户只是在询问但没有形成可保存内容、或用户明确不想保存时不要调用。调用前先完成"
-                        "对用户的正常回答；此工具不会直接保存笔记，只会生成待确认建议。"
+                        "当本轮对话中出现了明确、可独立保存的学习内容（概念、方法、结论、复习材料）时，"
+                        "调用此工具创建一条待用户确认的笔记建议。调用后你会收到建议ID确认。"
+                        "普通寒暄、内容不足、用户只是提问但未形成可保存内容时不要调用。"
+                        "先完成对用户的文字回答，再调用此工具。"
                     ),
-                    "strict": True,
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "title": {
                                 "type": "string",
-                                "description": "建议笔记的简短中文标题，建议 6-24 个字。",
+                                "description": "笔记标题，6-24个中文字",
                             },
                             "content": {
                                 "type": "string",
-                                "description": "建议保存进笔记的完整正文，需可脱离对话独立理解。",
+                                "description": "笔记正文，Markdown格式，需可脱离对话独立理解",
+                            },
+                            "category": {
+                                "type": "string",
+                                "description": "笔记分类，如：数学、物理、英语、化学、生物、语文、学习笔记",
                             },
                             "reason": {
-                                "type": ["string", "null"],
-                                "description": "为什么这条内容值得保存为笔记；没有特别原因时传 null。",
+                                "type": "string",
+                                "description": "为什么值得保存，不填则写'null'",
                             },
                             "tags": {
                                 "type": "array",
-                                "description": "建议标签，使用短中文词或英文词；没有合适标签时传空数组。",
                                 "items": {"type": "string"},
+                                "description": "标签列表，每个标签2-6个字",
                             },
                         },
-                        "required": ["title", "content", "reason", "tags"],
-                        "additionalProperties": False,
+                        "required": ["title", "content", "tags"],
                     },
                 },
             }
@@ -495,24 +632,25 @@ class ChatService:
         tags: Optional[Iterable[str]] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> ChatNoteSuggestion:
-        suggestion_content = " ".join(str(content if content is not None else source_message or "").split())
-        fallback_text = " ".join(str(source_message or "").split())
+        suggestion_content = self._clean_note_content(content if content is not None else source_message)
+        fallback_text = self._clean_note_content(source_message)
         if not suggestion_content:
             suggestion_content = fallback_text
-        suggestion_title = " ".join(str(title or "").split())[:255] or self._suggestion_title(
+        suggestion_title = self._clean_inline_text(title)[:255] or self._suggestion_title(
             suggestion_content or fallback_text
         )
         suggestion_metadata = {"source": "propose_note"}
         if metadata:
             suggestion_metadata.update(metadata)
+        normalized_tags = self._normalize_tags(tags) or ["chat"]
         suggestion = ChatNoteSuggestion(
             user_id=user_id,
             conversation_id=str(conversation_id),
             message_id=str(message_id) if message_id else None,
             title=suggestion_title,
             content=suggestion_content,
-            category=category or "聊天补充",
-            tags=self._normalize_tags(tags) or ["chat"],
+            category=self._infer_note_category(category=category, tags=normalized_tags, content=suggestion_content),
+            tags=normalized_tags,
             status="pending",
             suggestion_metadata=suggestion_metadata,
             created_at=datetime.now(timezone.utc),
@@ -523,6 +661,63 @@ class ChatService:
         self.db.refresh(suggestion)
         return suggestion
 
+    def execute_note_suggestion_tool(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        tool_call: Dict[str, Any],
+        source_message: str,
+    ) -> ToolCallResult:
+        if self._tool_call_name(tool_call) != NOTE_SUGGESTION_TOOL_NAME:
+            return ToolCallResult(kind="invalid_args", message="未知工具调用。")
+
+        args = self._parse_tool_call_arguments(tool_call)
+        if args is None:
+            return ToolCallResult(kind="invalid_args")
+
+        content = self._clean_note_content(args.get("content"))
+        if len(content) < 4:
+            return ToolCallResult(kind="invalid_args")
+
+        tool_call_id = self._clean_inline_text(tool_call.get("id"))
+        if tool_call_id:
+            for existing in self.get_suggestions_by_tool_call_ids(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                tool_call_ids=[tool_call_id],
+            ):
+                if str(existing.conversation_id) == str(conversation_id):
+                    return ToolCallResult(kind="suggestion_created", suggestion=existing)
+
+        title = self._clean_inline_text(args.get("title"))[:255] or self._suggestion_title(content)
+        category = self._clean_inline_text(args.get("category")) or None
+        tags = self._normalize_tags(args.get("tags") if isinstance(args.get("tags"), list) else [])
+        reason = self._clean_inline_text(args.get("reason")) or None
+
+        try:
+            suggestion = self.create_note_suggestion(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                message_id=None,
+                source_message=source_message,
+                title=title,
+                content=content,
+                category=category,
+                tags=tags,
+                metadata={
+                    "source": "propose_note_tool_call",
+                    "tool_call_id": tool_call.get("id"),
+                    "tool_call_index": tool_call.get("index"),
+                    "reason": reason,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to execute propose_note tool")
+            return ToolCallResult(kind="error", message=str(exc))
+
+        return ToolCallResult(kind="suggestion_created", suggestion=suggestion)
+
     def create_note_suggestion_from_tool_calls(
         self,
         *,
@@ -532,28 +727,57 @@ class ChatService:
         tool_calls: Iterable[Dict[str, Any]],
         source_message: str,
     ) -> Optional[ChatNoteSuggestion]:
-        for tool_call in tool_calls:
-            if not isinstance(tool_call, dict):
-                continue
-            payload = self._parse_note_suggestion_tool_call(tool_call)
-            if not payload:
-                continue
-            return self.create_note_suggestion(
+        parsed = self.parse_note_suggestion_tool_calls(tool_calls)
+        if parsed:
+            payload, tool_call = parsed
+            return self.create_note_suggestion_from_parsed_tool_call(
                 user_id=user_id,
                 conversation_id=conversation_id,
                 message_id=message_id,
                 source_message=source_message,
-                title=payload.get("title"),
-                content=payload.get("content"),
-                tags=payload.get("tags"),
-                metadata={
-                    "source": "propose_note_tool_call",
-                    "tool_call_id": tool_call.get("id"),
-                    "tool_call_index": tool_call.get("index"),
-                    "reason": payload.get("reason"),
-                },
+                payload=payload,
+                tool_call=tool_call,
             )
         return None
+
+    def parse_note_suggestion_tool_calls(
+        self,
+        tool_calls: Iterable[Dict[str, Any]],
+    ) -> Optional[tuple[Dict[str, Any], Dict[str, Any]]]:
+        for tool_call in tool_calls:
+            if not isinstance(tool_call, dict):
+                continue
+            payload = self._parse_note_suggestion_tool_call(tool_call)
+            if payload:
+                return payload, tool_call
+        return None
+
+    def create_note_suggestion_from_parsed_tool_call(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        message_id: Optional[str],
+        source_message: str,
+        payload: Dict[str, Any],
+        tool_call: Dict[str, Any],
+    ) -> ChatNoteSuggestion:
+        return self.create_note_suggestion(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            source_message=source_message,
+            title=payload.get("title"),
+            content=payload.get("content"),
+            category=payload.get("category"),
+            tags=payload.get("tags"),
+            metadata={
+                "source": "propose_note_tool_call",
+                "tool_call_id": tool_call.get("id"),
+                "tool_call_index": tool_call.get("index"),
+                "reason": payload.get("reason"),
+            },
+        )
 
     def get_suggestions_by_message_ids(
         self,
@@ -581,6 +805,39 @@ class ChatService:
             grouped.setdefault(str(suggestion.message_id), []).append(suggestion)
         return grouped
 
+    def get_suggestions_by_tool_call_ids(
+        self,
+        *,
+        user_id: str,
+        conversation_id: Optional[str] = None,
+        tool_call_ids: Iterable[str],
+    ) -> List[ChatNoteSuggestion]:
+        wanted = [str(item) for item in tool_call_ids if item]
+        if not wanted:
+            return []
+        wanted_set = set(wanted)
+        query = self.db.query(ChatNoteSuggestion).filter(ChatNoteSuggestion.user_id == user_id)
+        if conversation_id:
+            query = query.filter(ChatNoteSuggestion.conversation_id == str(conversation_id))
+
+        tool_call_id_expr = ChatNoteSuggestion.suggestion_metadata["tool_call_id"].as_string()
+        rows = query.filter(tool_call_id_expr.in_(wanted)).order_by(ChatNoteSuggestion.created_at.asc()).all()
+        by_id: Dict[str, ChatNoteSuggestion] = {}
+        for suggestion in rows:
+            metadata = suggestion.suggestion_metadata or {}
+            if not isinstance(metadata, dict):
+                continue
+            tool_call_id = str(metadata.get("tool_call_id") or "")
+            if tool_call_id in wanted_set and tool_call_id not in by_id:
+                by_id[tool_call_id] = suggestion
+        ordered: List[ChatNoteSuggestion] = []
+        seen: set[str] = set()
+        for item in wanted:
+            if item in by_id and item not in seen:
+                ordered.append(by_id[item])
+                seen.add(item)
+        return ordered
+
     def ensure_suggestions_for_messages(
         self,
         *,
@@ -593,10 +850,11 @@ class ChatService:
             user_id=user_id,
             message_ids=[str(message.id) for message in materialized_messages],
         )
+        needs_commit = False
 
         for message in materialized_messages:
             message_id = str(message.id)
-            if message.role != "assistant" or suggestions_by_message_id.get(message_id):
+            if message.role != "assistant":
                 continue
 
             metadata = message.message_metadata or {}
@@ -606,19 +864,62 @@ class ChatService:
             if isinstance(raw_tool_calls, dict):
                 tool_calls = [raw_tool_calls]
             elif isinstance(raw_tool_calls, list):
-                tool_calls = raw_tool_calls
+                tool_calls = [tool_call for tool_call in raw_tool_calls if isinstance(tool_call, dict)]
             else:
                 continue
 
-            suggestion = self.create_note_suggestion_from_tool_calls(
+            if not tool_calls:
+                continue
+
+            seen_suggestion_ids = {str(suggestion.id) for suggestion in suggestions_by_message_id.get(message_id, [])}
+            existing_suggestions = self.get_suggestions_by_tool_call_ids(
                 user_id=user_id,
                 conversation_id=conversation_id,
-                message_id=message_id,
-                tool_calls=tool_calls,
-                source_message=message.content,
+                tool_call_ids=[
+                    self._clean_inline_text((tool_call.get("id") if isinstance(tool_call, dict) else None))
+                    for tool_call in tool_calls
+                    if self._clean_inline_text((tool_call.get("id") if isinstance(tool_call, dict) else None))
+                ],
             )
-            if suggestion:
-                suggestions_by_message_id.setdefault(message_id, []).append(suggestion)
+            existing_by_tool_call_id: Dict[str, ChatNoteSuggestion] = {}
+            for suggestion in existing_suggestions:
+                metadata = suggestion.suggestion_metadata or {}
+                if not isinstance(metadata, dict):
+                    continue
+                tool_call_id = self._clean_inline_text(metadata.get("tool_call_id"))
+                if tool_call_id and tool_call_id not in existing_by_tool_call_id:
+                    existing_by_tool_call_id[tool_call_id] = suggestion
+
+            for tool_call in tool_calls:
+                tool_call_id = self._clean_inline_text(tool_call.get("id"))
+                if tool_call_id and tool_call_id in existing_by_tool_call_id:
+                    suggestion = existing_by_tool_call_id[tool_call_id]
+                    if not suggestion.message_id:
+                        suggestion.message_id = message_id
+                        needs_commit = True
+                    if str(suggestion.id) not in seen_suggestion_ids:
+                        suggestions_by_message_id.setdefault(message_id, []).append(suggestion)
+                        seen_suggestion_ids.add(str(suggestion.id))
+                    continue
+
+                payload = self._parse_note_suggestion_tool_call(tool_call)
+                if not payload:
+                    continue
+
+                suggestion = self.create_note_suggestion_from_parsed_tool_call(
+                    user_id=user_id,
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    source_message=message.content,
+                    payload=payload,
+                    tool_call=tool_call,
+                )
+                if str(suggestion.id) not in seen_suggestion_ids:
+                    suggestions_by_message_id.setdefault(message_id, []).append(suggestion)
+                    seen_suggestion_ids.add(str(suggestion.id))
+
+        if needs_commit:
+            self.db.commit()
 
         return suggestions_by_message_id
 
@@ -629,7 +930,13 @@ class ChatService:
             .first()
         )
 
-    def accept_suggestion(self, *, user_id: str, suggestion_id: str) -> ChatNoteSuggestion:
+    def accept_suggestion(
+        self,
+        *,
+        user_id: str,
+        suggestion_id: str,
+        category: Optional[str] = None,
+    ) -> ChatNoteSuggestion:
         suggestion = self.get_suggestion(user_id=user_id, suggestion_id=suggestion_id)
         if suggestion is None:
             raise ChatNotFoundError("suggestion not found")
@@ -638,24 +945,12 @@ class ChatService:
         if suggestion.status != "pending":
             raise ChatAccessError("suggestion is not pending")
 
-        note_payload = {
-            "title": suggestion.title,
-            "category": suggestion.category or "聊天补充",
-            "tags": suggestion.tags or ["chat"],
-            "image_urls": [],
-            "image_filenames": [],
-            "image_sizes": [],
-            "original_text": suggestion.content,
-            "structured_data": {
-                "title": suggestion.title,
-                "summary": suggestion.content[:200],
-                "raw_text": suggestion.content,
-                "sections": [{"heading": "聊天补充", "content": suggestion.content}],
-                "key_points": [],
-                "study_advice": "",
-                "meta": {"source": "chat_suggestion", "suggestion_id": suggestion.id},
-            },
-        }
+        selected_category = self._clean_inline_text(category)
+        if selected_category:
+            suggestion.category = selected_category[:100]
+            suggestion.updated_at = datetime.now(timezone.utc)
+
+        note_payload = self.build_note_payload_from_suggestion(suggestion)
         note = NoteService(self.db).create_note(
             note_payload,
             user_id,
@@ -670,6 +965,29 @@ class ChatService:
         self.db.refresh(suggestion)
         try_index_note(self.db, note)
         return suggestion
+
+    def build_note_payload_from_suggestion(self, suggestion: ChatNoteSuggestion) -> Dict[str, Any]:
+        content = self._clean_note_content(suggestion.content)
+        tags = self._normalize_tags(suggestion.tags or []) or ["chat"]
+        category = self._infer_note_category(category=suggestion.category, tags=tags, content=content)
+        structured_data = self._build_structured_note_data(
+            title=suggestion.title,
+            content=content,
+            category=category,
+            tags=tags,
+            metadata=suggestion.suggestion_metadata or {},
+            suggestion_id=suggestion.id,
+        )
+        return {
+            "title": suggestion.title,
+            "category": category,
+            "tags": tags,
+            "image_urls": [],
+            "image_filenames": [],
+            "image_sizes": [],
+            "original_text": content,
+            "structured_data": structured_data,
+        }
 
     def dismiss_suggestion(self, *, user_id: str, suggestion_id: str) -> ChatNoteSuggestion:
         suggestion = self.get_suggestion(user_id=user_id, suggestion_id=suggestion_id)
@@ -1027,13 +1345,148 @@ class ChatService:
 
     @staticmethod
     def _snippet(text: str, limit: int = 240) -> str:
-        clean = " ".join(str(text or "").split())
+        clean = ChatService._clean_inline_text(text)
         return clean[:limit]
 
     @staticmethod
     def _suggestion_title(text: str) -> str:
-        clean = " ".join(str(text or "").split())
+        clean = ChatService._clean_inline_text(text)
         return (clean[:48] or "聊天补充")
+
+    @staticmethod
+    def _infer_note_category(
+        *,
+        category: Optional[str],
+        tags: Optional[Iterable[str]],
+        content: str,
+    ) -> str:
+        explicit = ChatService._clean_inline_text(category)
+        if explicit and explicit not in {"聊天补充", "chat", "Chat"}:
+            return explicit[:100]
+
+        search_space = " ".join([*(str(tag or "") for tag in tags or []), content[:500]])
+        for subject, markers in SUBJECT_CATEGORY_MARKERS:
+            if any(marker in search_space for marker in markers):
+                return subject
+        return "学习笔记"
+
+    @staticmethod
+    def _build_structured_note_data(
+        *,
+        title: str,
+        content: str,
+        category: str,
+        tags: List[str],
+        metadata: Dict[str, Any],
+        suggestion_id: str,
+    ) -> Dict[str, Any]:
+        sections = ChatService._extract_note_sections(content)
+        key_points = ChatService._extract_key_points(content)
+        summary = ChatService._note_summary(content)
+        reason = metadata.get("reason") if isinstance(metadata, dict) else None
+        study_advice = (
+            ChatService._clean_inline_text(reason)
+            if reason
+            else "复习时先把各章节的核心结论对照理解，再用关键点自测能否独立复述。"
+        )
+        return {
+            "title": title,
+            "summary": summary,
+            "raw_text": content,
+            "sections": sections,
+            "key_points": key_points,
+            "study_advice": study_advice,
+            "meta": {
+                "source": "chat_suggestion",
+                "provider": "chat",
+                "suggestion_id": suggestion_id,
+                "category": category,
+                "tags": tags,
+            },
+        }
+
+    @staticmethod
+    def _extract_note_sections(content: str) -> List[Dict[str, str]]:
+        lines = content.splitlines()
+        sections: List[Dict[str, str]] = []
+        current_heading: Optional[str] = None
+        current_lines: List[str] = []
+        saw_heading = False
+
+        def flush() -> None:
+            nonlocal current_heading, current_lines
+            section_content = "\n".join(line.rstrip() for line in current_lines).strip()
+            if section_content:
+                sections.append({"heading": current_heading or "概览", "content": section_content})
+            current_heading = None
+            current_lines = []
+
+        for raw_line in lines:
+            line = raw_line.rstrip()
+            stripped = line.strip()
+            markdown_heading = re.match(r"^#{1,6}\s+(.+)$", stripped)
+            numbered_heading = re.match(r"^(?:\d+[.、]|[一二三四五六七八九十]+、)\s*(.+)$", stripped)
+            if markdown_heading or numbered_heading:
+                heading = (markdown_heading or numbered_heading).group(1).strip()
+                if heading:
+                    flush()
+                    current_heading = heading[:80]
+                    saw_heading = True
+                    continue
+            current_lines.append(line)
+
+        flush()
+        if not saw_heading:
+            return [{"heading": "知识整理", "content": content}]
+        if sections:
+            return sections
+        return [{"heading": "知识整理", "content": content}]
+
+    @staticmethod
+    def _extract_key_points(content: str, limit: int = 7) -> List[str]:
+        points: List[str] = []
+        for line in content.splitlines():
+            stripped = line.strip()
+            bullet = re.match(r"^(?:[-*•]\s+|\d+[.)、]\s+)(.+)$", stripped)
+            value = bullet.group(1).strip() if bullet else ""
+            if not value and any(marker in stripped for marker in ("核心", "总性质", "结论", "定理")):
+                value = stripped
+            value = ChatService._clean_inline_text(value)
+            if value and value not in points:
+                points.append(value[:180])
+            if len(points) >= limit:
+                break
+
+        if points:
+            return points
+
+        sentences = re.split(r"[。；;]\s*", ChatService._clean_inline_text(content))
+        for sentence in sentences:
+            value = sentence.strip()
+            if len(value) >= 8 and value not in points:
+                points.append(value[:180])
+            if len(points) >= min(3, limit):
+                break
+        return points
+
+    @staticmethod
+    def _note_summary(content: str, limit: int = 240) -> str:
+        for paragraph in re.split(r"\n\s*\n", content):
+            clean = ChatService._clean_inline_text(paragraph)
+            if clean:
+                return clean[:limit]
+        return ChatService._clean_inline_text(content)[:limit]
+
+    @staticmethod
+    def _clean_inline_text(text: Optional[str]) -> str:
+        return " ".join(str(text or "").split())
+
+    @staticmethod
+    def _clean_note_content(text: Optional[str]) -> str:
+        value = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
+        value = re.sub(r"[ \t\f\v]+", " ", value)
+        value = re.sub(r"\n{3,}", "\n\n", value)
+        return value.strip()
 
     @staticmethod
     def _normalize_tags(tags: Optional[Iterable[str]]) -> List[str]:
@@ -1048,54 +1501,76 @@ class ChatService:
         return normalized
 
     @classmethod
-    def _parse_note_suggestion_tool_call(cls, tool_call: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _tool_call_name(cls, tool_call: Dict[str, Any]) -> str:
         function = tool_call.get("function") or {}
         if not isinstance(function, dict):
-            return None
-        if function.get("name") != NOTE_SUGGESTION_TOOL_NAME:
+            function = {}
+        return cls._clean_inline_text(
+            function.get("name")
+            or tool_call.get("name")
+            or tool_call.get("tool")
+        )
+
+    @classmethod
+    def _parse_note_suggestion_tool_call(cls, tool_call: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if cls._tool_call_name(tool_call) != NOTE_SUGGESTION_TOOL_NAME:
             return None
 
-        raw_arguments = function.get("arguments") or {}
-        arguments = cls._decode_tool_arguments(raw_arguments)
+        arguments = cls._parse_tool_call_arguments(tool_call)
         if arguments is None:
-            logger.warning("Invalid propose_note tool arguments: %s", raw_arguments)
-            return None
-        if not isinstance(arguments, dict):
+            logger.warning("Invalid propose_note tool arguments: %s", tool_call)
             return None
 
-        content = " ".join(str(arguments.get("content") or "").split())
+        content = cls._clean_note_content(arguments.get("content"))
         if len(content) < 4:
             return None
-        title = " ".join(str(arguments.get("title") or "").split())[:255] or cls._suggestion_title(content)
+        title = cls._clean_inline_text(arguments.get("title"))[:255] or cls._suggestion_title(content)
         reason_value = arguments.get("reason")
-        reason = " ".join(str(reason_value).split()) if reason_value else None
+        reason = cls._clean_inline_text(reason_value) if reason_value else None
         raw_tags = arguments.get("tags")
         tags = cls._normalize_tags(raw_tags if isinstance(raw_tags, list) else [])
+        category = cls._clean_inline_text(arguments.get("category")) or None
         return {
             "title": title,
             "content": content,
+            "category": category,
             "reason": reason,
             "tags": tags,
         }
 
     @classmethod
-    def _decode_tool_arguments(cls, raw_arguments: Any) -> Optional[Dict[str, Any]]:
-        if isinstance(raw_arguments, dict):
-            return raw_arguments
+    def _parse_tool_call_arguments(cls, tool_call: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        function = tool_call.get("function") or {}
+        if not isinstance(function, dict):
+            function = {}
+
+        raw_arguments = function.get("arguments") if "arguments" in function else None
+        if raw_arguments is None:
+            raw_arguments = tool_call.get("arguments")
+        if raw_arguments is None:
+            raw_arguments = tool_call.get("parameters")
         if raw_arguments is None:
             return {}
-        if not isinstance(raw_arguments, str):
-            return None
+        if isinstance(raw_arguments, dict):
+            return raw_arguments
+        if isinstance(raw_arguments, str):
+            return cls._try_parse_json(raw_arguments)
+        return None
 
-        raw_text = raw_arguments.strip()
+    @classmethod
+    def _try_parse_json(cls, text: str) -> Optional[Dict[str, Any]]:
+        raw_text = str(text or "").strip()
         if not raw_text:
             return {}
 
         candidates = [raw_text]
-        cleaned = cls._extract_json_object(raw_text)
-        if cleaned != raw_text:
-            candidates.append(cleaned)
-        repaired = cls._repair_json_object(cleaned)
+        translated = cls._translate_json_quotes(raw_text)
+        if translated not in candidates:
+            candidates.append(translated)
+        extracted = cls._extract_json_value(translated)
+        if extracted not in candidates:
+            candidates.append(extracted)
+        repaired = cls._repair_json_object(extracted)
         if repaired not in candidates:
             candidates.append(repaired)
 
@@ -1104,28 +1579,59 @@ class ChatService:
                 decoded = json.loads(candidate)
             except (TypeError, json.JSONDecodeError):
                 continue
-            if isinstance(decoded, dict):
-                return decoded
-            return None
+            return decoded if isinstance(decoded, dict) else None
         return None
 
     @staticmethod
-    def _extract_json_object(text: str) -> str:
+    def _translate_json_quotes(text: str) -> str:
+        return text.translate(
+            str.maketrans(
+                {
+                    "“": '"',
+                    "”": '"',
+                    "„": '"',
+                    "‟": '"',
+                    "‘": "'",
+                    "’": "'",
+                }
+            )
+        )
+
+    @staticmethod
+    def _extract_json_value(text: str) -> str:
         json_block = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
         if json_block:
             text = json_block.group(1).strip()
 
         first_brace = text.find("{")
+        if first_brace == -1:
+            return text.strip()
         last_brace = text.rfind("}")
-        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-            return text[first_brace : last_brace + 1].strip()
-        return text.strip()
+        if last_brace > first_brace:
+            return text[first_brace:last_brace + 1].strip()
+        return text[first_brace:].strip()
 
     @classmethod
     def _repair_json_object(cls, text: str) -> str:
         repaired = re.sub(r",\s*([\]}])", r"\1", text.strip())
+        repaired = cls._quote_bare_string_values(repaired)
         repaired = re.sub(r"\\(?![\"\\/bfnrtu])", r"\\\\", repaired)
         return cls._escape_control_chars_in_json_strings(repaired)
+
+    @staticmethod
+    def _quote_bare_string_values(text: str) -> str:
+        pattern = re.compile(
+            r'("(?P<key>title|content|category|reason)"\s*:\s*)'
+            r'(?P<value>(?!\s*(?:null\b|true\b|false\b|[-\d\[\{"])).*?)'
+            r'(?=(,\s*"(?:title|content|category|reason|tags)"\s*:)|(\s*\}))',
+            re.DOTALL,
+        )
+
+        def replace(match: re.Match[str]) -> str:
+            raw_value = match.group("value").strip()
+            return f"{match.group(1)}{json.dumps(raw_value, ensure_ascii=False)}"
+
+        return pattern.sub(replace, text)
 
     @staticmethod
     def _escape_control_chars_in_json_strings(text: str) -> str:
