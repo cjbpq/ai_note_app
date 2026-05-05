@@ -4,9 +4,12 @@
   "version": "0.2.0",
   "scripts": {
     "start": "expo start",
+    "start:dev-client": "expo start --dev-client --host lan",
+    "start:dev-client:clear": "expo start --dev-client --host lan -c",
+    "start:dev-client:tunnel": "expo start --dev-client --tunnel",
     "reset-project": "node ./scripts/reset-project.js",
     "generate:math-assets": "node ./scripts/generate-math-assets.mjs",
-    "android": "expo start --android",
+    "android": "expo start --dev-client --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint"
