@@ -30,6 +30,21 @@ class ChatConversationResponse(BaseModel):
     updated_at: datetime
 
 
+class ChatNoteSuggestionResponse(BaseModel):
+    id: uuid.UUID
+    conversation_id: uuid.UUID
+    message_id: Optional[uuid.UUID] = None
+    title: str
+    content: str
+    category: Optional[str] = None
+    tags: List[str]
+    status: Literal["pending", "accepted", "dismissed"]
+    note_id: Optional[uuid.UUID] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
 class ChatMessageResponse(BaseModel):
     id: uuid.UUID
     conversation_id: uuid.UUID
@@ -37,6 +52,7 @@ class ChatMessageResponse(BaseModel):
     content: str
     sequence: int
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    suggestions: List[ChatNoteSuggestionResponse] = Field(default_factory=list)
     created_at: datetime
 
 
@@ -66,21 +82,6 @@ class ChatConversationBatchDeleteResponse(BaseModel):
 
 class ChatConversationForkRequest(BaseModel):
     from_message_id: uuid.UUID
-
-
-class ChatNoteSuggestionResponse(BaseModel):
-    id: uuid.UUID
-    conversation_id: uuid.UUID
-    message_id: Optional[uuid.UUID] = None
-    title: str
-    content: str
-    category: Optional[str] = None
-    tags: List[str]
-    status: Literal["pending", "accepted", "dismissed"]
-    note_id: Optional[uuid.UUID] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime
-    updated_at: datetime
 
 
 class ChatSuggestionAcceptResponse(BaseModel):

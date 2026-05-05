@@ -52,8 +52,8 @@ def _conversation_response(service: ChatService, conversation) -> ChatConversati
     return ChatConversationResponse(**service.serialize_conversation(conversation))
 
 
-def _message_response(service: ChatService, message) -> ChatMessageResponse:
-    return ChatMessageResponse(**service.serialize_message(message))
+def _message_response(service: ChatService, message, suggestions=None) -> ChatMessageResponse:
+    return ChatMessageResponse(**service.serialize_message(message, suggestions=suggestions))
 
 
 def _suggestion_response(service: ChatService, suggestion) -> ChatNoteSuggestionResponse:
@@ -351,9 +351,21 @@ async def get_conversation_detail(
     if conversation is None:
         raise HTTPException(status_code=404, detail="对话不存在")
     messages = service.get_messages(user_id=current_user.id, conversation_id=str(conversation_id))
+    suggestions_by_message_id = service.ensure_suggestions_for_messages(
+        user_id=current_user.id,
+        conversation_id=str(conversation_id),
+        messages=messages,
+    )
     return ChatConversationDetailResponse(
         conversation=_conversation_response(service, conversation),
-        messages=[_message_response(service, message) for message in messages],
+        messages=[
+            _message_response(
+                service,
+                message,
+                suggestions=suggestions_by_message_id.get(str(message.id), []),
+            )
+            for message in messages
+        ],
     )
 
 
