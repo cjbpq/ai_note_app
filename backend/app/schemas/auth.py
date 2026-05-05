@@ -93,3 +93,15 @@ class ChangeEmailResponse(MessageResponse):
     """Response for email change."""
 
     email: EmailStr
+
+
+class UserPreferencesRequest(BaseModel):
+    """Writable user-level feature preferences."""
+
+    chat_thinking_enabled: bool
+
+
+class UserPreferencesResponse(BaseModel):
+    """Current user-level feature preferences."""
+
+    chat_thinking_enabled: bool

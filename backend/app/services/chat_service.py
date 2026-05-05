@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 ChatIntent = Literal["chat", "note_question", "out_of_scope_note_worthy"]
 NOTE_SUGGESTION_TOOL_NAME = "propose_note"
+TOKEN_ESTIMATE_CHARS_PER_TOKEN = 2
+CONTEXT_SAFETY_MARGIN_TOKENS = 1024
 
 
 class ChatNotFoundError(LookupError):
@@ -87,6 +89,14 @@ def classify_chat_intent(message: str) -> ChatIntent:
     if len(text) >= 80:
         return "out_of_scope_note_worthy"
     return "chat"
+
+
+def should_enable_note_suggestion_tool(*, intent: ChatIntent, references: List[Dict[str, Any]]) -> bool:
+    if intent == "out_of_scope_note_worthy":
+        return True
+    if references:
+        return False
+    return True
 
 
 class ChatService:
@@ -303,11 +313,12 @@ class ChatService:
         top_k: Optional[int] = None,
         query_vector: bool = True,
     ) -> List[Dict[str, Any]]:
-        references: List[Dict[str, Any]] = []
-        references.extend(self._references_from_explicit_notes(user_id=user_id, note_ids=list(referenced_note_ids)))
+        explicit_references = self._dedupe_references(
+            self._references_from_explicit_notes(user_id=user_id, note_ids=list(referenced_note_ids))
+        )
 
         if not query_vector:
-            return self._dedupe_and_cap_references(references)
+            return self._strip_internal_reference_flags(explicit_references)
 
         configured_top_k = int(top_k or settings.CHAT_RAG_TOP_K)
         if not self.vector_client.is_configured:
@@ -318,8 +329,12 @@ class ChatService:
             top_k=configured_top_k,
             library="notes",
         )
-        references.extend(self._references_from_hits(user_id=user_id, hits=hits))
-        return self._dedupe_and_cap_references(references)
+        explicit_chunk_keys = {(ref.get("note_id"), ref.get("chunk_id")) for ref in explicit_references}
+        vector_references = self._dedupe_and_cap_references(
+            self._references_from_hits(user_id=user_id, hits=hits),
+            skip_chunk_keys=explicit_chunk_keys,
+        )
+        return self._strip_internal_reference_flags([*explicit_references, *vector_references])
 
     def build_model_messages(
         self,
@@ -329,26 +344,98 @@ class ChatService:
         intent: ChatIntent,
         references: List[Dict[str, Any]],
         note_tool_enabled: bool = False,
+        force_compact: bool = False,
+        force_reference_summary: bool = False,
     ) -> List[Dict[str, str]]:
-        system_prompt = self._build_system_prompt(
+        conversation = self.get_conversation(user_id=user_id, conversation_id=conversation_id)
+        if conversation is None:
+            raise ChatNotFoundError("conversation not found")
+
+        compacted_for_request = False
+        if force_compact:
+            self.compact_conversation(user_id=user_id, conversation_id=conversation_id, force=True)
+            self.db.refresh(conversation)
+            compacted_for_request = True
+
+        model_references = references
+        reference_summary: Optional[str] = None
+        messages = self._assemble_model_messages(
+            conversation=conversation,
+            user_id=user_id,
             intent=intent,
-            references=references,
+            references=model_references,
+            reference_summary=reference_summary,
             note_tool_enabled=note_tool_enabled,
         )
-        messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
-        history_limit = max(1, int(settings.CHAT_HISTORY_CONTEXT_MESSAGES or 12))
+        if force_reference_summary or self._estimate_messages_tokens(messages) > self._max_input_tokens():
+            compacted = False
+            if not compacted_for_request:
+                compacted = self.compact_conversation(user_id=user_id, conversation_id=conversation_id, force=True)
+            if compacted:
+                self.db.refresh(conversation)
+                messages = self._assemble_model_messages(
+                    conversation=conversation,
+                    user_id=user_id,
+                    intent=intent,
+                    references=model_references,
+                    reference_summary=reference_summary,
+                    note_tool_enabled=note_tool_enabled,
+                )
+
+        if (force_reference_summary or self._estimate_messages_tokens(messages) > self._max_input_tokens()) and references:
+            reference_summary = self._summarize_references_for_context(references)
+            messages = self._assemble_model_messages(
+                conversation=conversation,
+                user_id=user_id,
+                intent=intent,
+                references=[],
+                reference_summary=reference_summary,
+                note_tool_enabled=note_tool_enabled,
+            )
+
+        if self._estimate_messages_tokens(messages) > self._max_input_tokens():
+            messages = self._fit_messages_to_context(messages)
+        return messages
+
+    def compact_conversation(self, *, user_id: str, conversation_id: str, force: bool = False) -> bool:
+        conversation = self.get_conversation(user_id=user_id, conversation_id=conversation_id)
+        if conversation is None:
+            raise ChatNotFoundError("conversation not found")
+
+        keep_recent = max(1, int(settings.CHAT_COMPACT_KEEP_RECENT_MESSAGES or 12))
         history = (
             self.db.query(ChatMessage)
             .filter(ChatMessage.conversation_id == str(conversation_id), ChatMessage.user_id == user_id)
-            .order_by(ChatMessage.sequence.desc())
-            .limit(history_limit)
+            .order_by(ChatMessage.sequence.asc())
             .all()
         )
-        for message in reversed(history):
-            if message.role not in {"user", "assistant"}:
-                continue
-            messages.append({"role": message.role, "content": message.content})
-        return messages
+        eligible = [message for message in history if message.role in {"user", "assistant"}]
+        if len(eligible) <= keep_recent:
+            return False
+
+        cutoff_sequence = eligible[-keep_recent - 1].sequence
+        compacted_until = int(conversation.context_compacted_until_sequence or 0)
+        if cutoff_sequence <= compacted_until and not force:
+            return False
+
+        messages_to_compact = [
+            message
+            for message in eligible
+            if compacted_until < int(message.sequence) <= cutoff_sequence
+        ]
+        if not messages_to_compact:
+            return False
+
+        new_summary = self._generate_context_summary(
+            existing_summary=conversation.context_summary or "",
+            messages=messages_to_compact,
+        )
+        conversation.context_summary = new_summary
+        conversation.context_compacted_until_sequence = cutoff_sequence
+        conversation.context_summary_updated_at = datetime.now(timezone.utc)
+        conversation.updated_at = datetime.now(timezone.utc)
+        self.db.commit()
+        return True
 
     # ── Suggestions ─────────────────────────────────────────────────
 
@@ -593,21 +680,19 @@ class ChatService:
         for note_id in requested:
             note = found_by_id[note_id]
             chunks = indexer.extract_chunks(note)
-            if not chunks:
-                continue
-            chunk = chunks[0]
-            references.append(
-                {
-                    "note_id": str(note.id),
-                    "title": note.title,
-                    "chunk_id": chunk.chunk_id,
-                    "section_heading": chunk.section_heading,
-                    "snippet": self._snippet(chunk.text),
-                    "score": 1.0,
-                    "text": chunk.text,
-                    "_explicit": True,
-                }
-            )
+            for chunk in chunks:
+                references.append(
+                    {
+                        "note_id": str(note.id),
+                        "title": note.title,
+                        "chunk_id": chunk.chunk_id,
+                        "section_heading": chunk.section_heading,
+                        "snippet": self._snippet(chunk.text),
+                        "score": 1.0,
+                        "text": chunk.text,
+                        "_explicit": True,
+                    }
+                )
         return references
 
     def _references_from_hits(self, *, user_id: str, hits: Iterable[NexoraDBHit]) -> List[Dict[str, Any]]:
@@ -642,11 +727,16 @@ class ChatService:
             )
         return references
 
-    def _dedupe_and_cap_references(self, references: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _dedupe_and_cap_references(
+        self,
+        references: List[Dict[str, Any]],
+        *,
+        skip_chunk_keys: Optional[set] = None,
+    ) -> List[Dict[str, Any]]:
         max_chunks = max(1, int(settings.CHAT_RAG_MAX_CHUNKS or 6))
         max_notes = max(1, int(settings.CHAT_RAG_MAX_NOTES or 4))
         max_context_chars = max(1000, int(settings.CHAT_RAG_MAX_CONTEXT_CHARS or 12000))
-        seen_chunks = set()
+        seen_chunks = set(skip_chunk_keys or set())
         seen_notes = set()
         out: List[Dict[str, Any]] = []
         total_chars = 0
@@ -678,12 +768,79 @@ class ChatService:
             ref.pop("_explicit", None)
         return out
 
-    def _build_system_prompt(
+    @staticmethod
+    def _dedupe_references(references: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        seen_chunks = set()
+        out: List[Dict[str, Any]] = []
+        for ref in references:
+            chunk_key = (ref.get("note_id"), ref.get("chunk_id"))
+            if chunk_key in seen_chunks:
+                continue
+            seen_chunks.add(chunk_key)
+            out.append(ref)
+        return out
+
+    @staticmethod
+    def _strip_internal_reference_flags(references: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for ref in references:
+            item = dict(ref)
+            item.pop("_explicit", None)
+            out.append(item)
+        return out
+
+    def _assemble_model_messages(
         self,
         *,
+        conversation: ChatConversation,
+        user_id: str,
         intent: ChatIntent,
         references: List[Dict[str, Any]],
-        note_tool_enabled: bool = False,
+        reference_summary: Optional[str],
+        note_tool_enabled: bool,
+    ) -> List[Dict[str, str]]:
+        system_prompt = self._build_context_system_prompt(
+            intent=intent,
+            has_references=bool(references or reference_summary),
+            note_tool_enabled=note_tool_enabled,
+        )
+        messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
+        if references:
+            messages.append({"role": "system", "content": self._build_references_prompt(references)})
+        elif reference_summary:
+            messages.append({"role": "system", "content": f"当前引用资料摘要:\n{reference_summary}"})
+
+        if conversation.context_summary:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": f"此前对话摘要:\n{conversation.context_summary}",
+                }
+            )
+
+        compacted_until = int(conversation.context_compacted_until_sequence or 0)
+        history = (
+            self.db.query(ChatMessage)
+            .filter(
+                ChatMessage.conversation_id == str(conversation.id),
+                ChatMessage.user_id == user_id,
+                ChatMessage.sequence > compacted_until,
+            )
+            .order_by(ChatMessage.sequence.asc())
+            .all()
+        )
+        for message in history:
+            if message.role not in {"user", "assistant"}:
+                continue
+            messages.append({"role": message.role, "content": message.content})
+        return messages
+
+    @staticmethod
+    def _build_context_system_prompt(
+        *,
+        intent: ChatIntent,
+        has_references: bool,
+        note_tool_enabled: bool,
     ) -> str:
         base = (
             "你是 AI Note 的笔记对话助手。请使用简体中文，回答要清晰、准确、可执行。"
@@ -691,22 +848,107 @@ class ChatService:
         )
         if note_tool_enabled:
             base += (
-                "如果可用工具包含 propose_note，只有当本轮用户输入或你的回答中形成了明确、可独立保存的"
-                "学习笔记内容时，先正常回答用户，再调用 propose_note 生成待确认建议；普通寒暄、泛泛问答、"
-                "内容不足或用户不想保存时不要调用。"
+                "如果可用工具包含 propose_note，只在本轮用户输入或你的回答形成明确、可独立保存的学习笔记内容时调用；"
+                "普通寒暄、泛泛问答、内容不足或用户不想保存时不要调用。"
             )
+        if has_references:
+            return base + "当前对话已提供笔记资料，请优先根据资料回答；资料不足时再说明不确定。"
         if intent == "chat":
             return base + "当前没有外部笔记资料，直接回答用户。"
-        if not references:
-            return base + "当前没有可用的笔记检索结果。"
+        return base + "当前没有可用的笔记检索结果。"
 
+    def _generate_context_summary(self, *, existing_summary: str, messages: List[ChatMessage]) -> str:
+        lines = []
+        for message in messages:
+            role = "用户" if message.role == "user" else "助手"
+            lines.append(f"{role}#{message.sequence}: {message.content}")
+        source = "\n\n".join(lines)
+        prompt = [
+            {
+                "role": "system",
+                "content": (
+                    "你负责为 AI Note 聊天保留滚动上下文摘要。"
+                    "请用简体中文压缩旧对话，保留用户目标、已给出的结论、关键约束、待办和重要事实。"
+                    "不要加入新信息。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"已有摘要:\n{existing_summary or '无'}\n\n"
+                    f"需要合并的旧消息:\n{source}\n\n"
+                    "请输出更新后的摘要。"
+                ),
+            },
+        ]
+        try:
+            summary = self.model_service.complete_chat(prompt, max_tokens=2048)
+        except Exception:  # noqa: BLE001
+            fallback = f"{existing_summary}\n\n{source}".strip()
+            return fallback[:12000]
+        return (summary.strip() or existing_summary or source[:12000])[:12000]
+
+    def _summarize_references_for_context(self, references: List[Dict[str, Any]]) -> str:
+        blocks = []
+        for idx, ref in enumerate(references, start=1):
+            heading = f" / {ref.get('section_heading')}" if ref.get("section_heading") else ""
+            blocks.append(
+                f"[{idx}] note_id={ref.get('note_id')} title={ref.get('title')}{heading}\n{ref.get('text')}"
+            )
+        source = "\n\n".join(blocks)
+        prompt = [
+            {
+                "role": "system",
+                "content": (
+                    "你负责压缩当前轮引用的学习笔记资料。"
+                    "请保留每篇笔记的主题、关键概念、步骤、公式、结论和可回答用户问题的证据。"
+                    "不要加入资料中没有的信息。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"请把以下引用资料压缩为可供回答问题使用的摘要:\n\n{source}",
+            },
+        ]
+        try:
+            summary = self.model_service.complete_chat(prompt, max_tokens=4096)
+        except Exception:  # noqa: BLE001
+            return source[:48000]
+        return summary.strip() or source[:48000]
+
+    @staticmethod
+    def _build_references_prompt(references: List[Dict[str, Any]]) -> str:
         blocks = []
         for idx, ref in enumerate(references, start=1):
             heading = f" / {ref.get('section_heading')}" if ref.get("section_heading") else ""
             blocks.append(
                 f"[{idx}] note_id={ref.get('note_id')} 标题={ref.get('title')}{heading}\n{ref.get('text')}"
             )
-        return base + "\n\n可用笔记资料：\n" + "\n\n".join(blocks)
+        return "可用笔记资料:\n" + "\n\n".join(blocks)
+
+    def _estimate_messages_tokens(self, messages: List[Dict[str, str]]) -> int:
+        chars = 0
+        for message in messages:
+            chars += len(str(message.get("role") or "")) + len(str(message.get("content") or ""))
+        return max(1, chars // TOKEN_ESTIMATE_CHARS_PER_TOKEN)
+
+    @staticmethod
+    def _max_input_tokens() -> int:
+        window = max(1000, int(settings.DOUBAO_CONTEXT_WINDOW_TOKENS or 256000))
+        completion_reserve = max(0, int(settings.DOUBAO_MAX_COMPLETION_TOKENS or 0))
+        return max(1000, window - completion_reserve - CONTEXT_SAFETY_MARGIN_TOKENS)
+
+    def _fit_messages_to_context(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        budget = self._max_input_tokens()
+        if self._estimate_messages_tokens(messages) <= budget:
+            return messages
+
+        system_messages = [message for message in messages if message.get("role") == "system"]
+        conversation_messages = [message for message in messages if message.get("role") != "system"]
+        kept = list(conversation_messages)
+        while kept and self._estimate_messages_tokens([*system_messages, *kept]) > budget:
+            kept.pop(0)
+        return [*system_messages, *kept]
 
     @staticmethod
     def _snippet(text: str, limit: int = 240) -> str:

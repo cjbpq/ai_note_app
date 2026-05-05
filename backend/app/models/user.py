@@ -17,6 +17,7 @@ class User(Base):
     username = Column(String(50), unique=True, index=True, nullable=False)
     email = Column(String(255), unique=True, nullable=True)
     email_verified = Column(Boolean, nullable=False, default=False)
+    chat_thinking_enabled = Column(Boolean, nullable=False, default=False)
     # Keep backward compatibility with legacy code/tests using `hashed_password`.
     password_hash = Column(String(255), nullable=False)
     hashed_password = synonym("password_hash")
