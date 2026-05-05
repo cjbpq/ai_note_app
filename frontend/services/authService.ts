@@ -14,6 +14,8 @@ import {
   ResetPasswordRequest,
   TokenRefreshResponse,
   User,
+  UserPreferencesRequest,
+  UserPreferencesResponse,
   UserResponse,
 } from "../types";
 import api from "./api";
@@ -133,6 +135,51 @@ export const authService = {
             key: "error.auth.unauthorized",
             toastType: "info",
             actionKey: "common.login",
+          },
+        },
+      });
+    }
+  },
+
+  getPreferences: async (): Promise<UserPreferencesResponse> => {
+    try {
+      const response = await api.get<UserPreferencesResponse>(
+        ENDPOINTS.AUTH.PREFERENCES,
+      );
+      return response as unknown as UserPreferencesResponse;
+    } catch (error) {
+      throw parseServiceError(error, {
+        fallbackKey: "error.auth.preferencesFetchFailed",
+        statusMap: {
+          401: {
+            key: "error.auth.unauthorized",
+            toastType: "info",
+          },
+        },
+      });
+    }
+  },
+
+  updatePreferences: async (
+    request: UserPreferencesRequest,
+  ): Promise<UserPreferencesResponse> => {
+    try {
+      const response = await api.put<UserPreferencesResponse>(
+        ENDPOINTS.AUTH.PREFERENCES,
+        request,
+      );
+      return response as unknown as UserPreferencesResponse;
+    } catch (error) {
+      throw parseServiceError(error, {
+        fallbackKey: "error.auth.preferencesUpdateFailed",
+        statusMap: {
+          401: {
+            key: "error.auth.unauthorized",
+            toastType: "info",
+          },
+          422: {
+            key: "error.validation.invalid",
+            toastType: "warning",
           },
         },
       });

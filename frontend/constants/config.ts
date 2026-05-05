@@ -123,6 +123,7 @@ export const ENDPOINTS = {
     PASSWORD_CHANGE: "/auth/password/change", // 已登录用户修改密码
     PASSWORD_RESET: "/auth/password/reset", // 忘记密码/重置密码（邮箱验证码）
     EMAIL_CHANGE: "/auth/email/change", // 修改绑定邮箱
+    PREFERENCES: "/auth/preferences",
   },
   LIBRARY: {
     UPLOAD_IMAGE: "/library/notes/from-image",

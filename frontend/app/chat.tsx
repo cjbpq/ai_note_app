@@ -4,7 +4,9 @@ import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ActivityIndicator,
+  Animated,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
@@ -12,6 +14,7 @@ import {
 } from "react-native";
 import {
   Appbar,
+  Button,
   IconButton,
   Surface,
   Text,
@@ -36,6 +39,7 @@ import { useChatConversations } from "../hooks/useChatConversations";
 import { useCategories } from "../hooks/useCategories";
 import { useNotes } from "../hooks/useNotes";
 import { useToast } from "../hooks/useToast";
+import { useUserPreferences } from "../hooks/useUserPreferences";
 import { chatService } from "../services/chatService";
 import { noteService } from "../services/noteService";
 import {
@@ -47,6 +51,10 @@ import {
 } from "../types";
 
 const MAX_REFERENCE_NOTES = 20;
+
+type BlurHandle = {
+  blur: () => void;
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -145,6 +153,8 @@ export default function ChatScreen() {
     noteTitle?: string;
   }>();
   const listRef = useRef<FlatList<ChatMessage>>(null);
+  const inputRef = useRef<BlurHandle | null>(null);
+  const composerTranslateY = useRef(new Animated.Value(0)).current;
   const hasAppliedRouteReferenceRef = useRef(false);
   const [draft, setDraft] = useState("");
   const [sessionReferences, setSessionReferences] = useState<
@@ -218,6 +228,12 @@ export default function ChatScreen() {
     isBatchDeleting,
     invalidateConversations,
   } = useChatConversations();
+  const {
+    chatThinkingEnabled,
+    isLoadingPreferences,
+    isUpdatingPreferences,
+    setChatThinkingEnabled,
+  } = useUserPreferences();
 
   const canSend = draft.trim().length > 0 && !isStreaming;
   const selectedReferences = useMemo(
@@ -227,9 +243,7 @@ export default function ChatScreen() {
   const isReferenceLimitReached =
     selectedReferences.length >= MAX_REFERENCE_NOTES;
   const composerBottomPadding =
-    Platform.OS === "ios"
-      ? Math.max(insets.bottom, 12)
-      : Math.max(insets.bottom, 32);
+    Platform.OS === "ios" ? Math.max(insets.bottom, 12) : 46;
 
   const createReferenceFromId = useCallback(
     (id: string): ChatReferenceNote => {
@@ -297,6 +311,57 @@ export default function ChatScreen() {
         : [routeReference, ...prev],
     );
   }, [routeReference]);
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+
+    // TODO: Replace this lightweight sticky composer with
+    // react-native-keyboard-controller if chat input behavior needs
+    // native-grade keyboard sync across Android ROMs.
+    const setComposerOffset = (toValue: number) => {
+      composerTranslateY.stopAnimation();
+      composerTranslateY.setValue(toValue);
+    };
+    const resetComposer = () => {
+      setComposerOffset(0);
+    };
+
+    const keyboardShowSubscription = Keyboard.addListener(
+      "keyboardWillShow",
+      (event) => {
+        const keyboardHeight = event.endCoordinates?.height ?? 0;
+        setComposerOffset(-keyboardHeight);
+      },
+    );
+    const keyboardHideSubscription = Keyboard.addListener(
+      "keyboardWillHide",
+      () => {
+        resetComposer();
+        inputRef.current?.blur();
+      },
+    );
+    const keyboardDidShowSubscription = Keyboard.addListener(
+      "keyboardDidShow",
+      (event) => {
+        const keyboardHeight = event.endCoordinates?.height ?? 0;
+        setComposerOffset(-keyboardHeight);
+      },
+    );
+    const keyboardDidHideSubscription = Keyboard.addListener(
+      "keyboardDidHide",
+      () => {
+        resetComposer();
+        inputRef.current?.blur();
+      },
+    );
+
+    return () => {
+      keyboardShowSubscription.remove();
+      keyboardHideSubscription.remove();
+      keyboardDidShowSubscription.remove();
+      keyboardDidHideSubscription.remove();
+    };
+  }, [composerTranslateY]);
 
   useEffect(() => {
     if (!routeReference || !hasAppliedRouteReferenceRef.current) return;
@@ -429,6 +494,16 @@ export default function ChatScreen() {
     if (isStreaming) return;
     setIsReferencePickerVisible(true);
   }, [isStreaming]);
+
+  const handleToggleDeepThinking = useCallback(() => {
+    if (isLoadingPreferences || isUpdatingPreferences) return;
+    setChatThinkingEnabled(!chatThinkingEnabled);
+  }, [
+    chatThinkingEnabled,
+    isLoadingPreferences,
+    isUpdatingPreferences,
+    setChatThinkingEnabled,
+  ]);
 
   const handleSelectReference = useCallback(
     (note: ChatReferenceNote) => {
@@ -684,7 +759,8 @@ export default function ChatScreen() {
 
       <KeyboardAvoidingView
         style={styles.keyboard}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        enabled={Platform.OS === "ios"}
       >
         <FlatList
           ref={listRef}
@@ -721,13 +797,17 @@ export default function ChatScreen() {
           onLayout={scrollToEnd}
         />
 
-        <View
+        <Animated.View
           style={[
             styles.composer,
             {
               borderTopColor: theme.colors.outlineVariant,
               backgroundColor: theme.colors.surface,
               paddingBottom: composerBottomPadding,
+              transform:
+                Platform.OS === "android"
+                  ? [{ translateY: composerTranslateY }]
+                  : undefined,
             },
           ]}
         >
@@ -752,6 +832,9 @@ export default function ChatScreen() {
               style={styles.addReferenceButton}
             />
             <TextInput
+              ref={(instance: BlurHandle | null) => {
+                inputRef.current = instance;
+              }}
               mode="outlined"
               dense
               value={draft}
@@ -787,7 +870,42 @@ export default function ChatScreen() {
               />
             )}
           </View>
-        </View>
+
+          <View style={styles.composerToolRow}>
+            <Button
+              mode={chatThinkingEnabled ? "contained-tonal" : "outlined"}
+              compact
+              icon="brain"
+              onPress={handleToggleDeepThinking}
+              disabled={isLoadingPreferences || isUpdatingPreferences}
+              style={[
+                styles.deepThinkingButton,
+                chatThinkingEnabled
+                  ? {
+                      backgroundColor: theme.colors.primaryContainer,
+                    }
+                  : {
+                      borderColor: theme.colors.outlineVariant,
+                    },
+              ]}
+              labelStyle={[
+                styles.deepThinkingLabel,
+                {
+                  color: chatThinkingEnabled
+                    ? theme.colors.onPrimaryContainer
+                    : theme.colors.onSurfaceVariant,
+                },
+              ]}
+              accessibilityLabel={
+                chatThinkingEnabled
+                  ? t("chat.deep_thinking_on")
+                  : t("chat.deep_thinking_off")
+              }
+            >
+              {t("chat.deep_thinking")}
+            </Button>
+          </View>
+        </Animated.View>
       </KeyboardAvoidingView>
 
       <ChatReferencePickerSheet
@@ -889,7 +1007,7 @@ const styles = StyleSheet.create({
   composer: {
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 12,
-    paddingTop: 8,
+    paddingTop: 10,
   },
   composerReferenceRow: {
     marginBottom: 8,
@@ -901,6 +1019,23 @@ const styles = StyleSheet.create({
   },
   addReferenceButton: {
     margin: 0,
+  },
+  composerToolRow: {
+    minHeight: 38,
+    paddingTop: 10,
+    paddingBottom: 2,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  deepThinkingButton: {
+    borderRadius: 999,
+    minHeight: 34,
+  },
+  deepThinkingLabel: {
+    marginHorizontal: 12,
+    marginVertical: 5,
+    fontSize: 14,
+    lineHeight: 20,
   },
   input: {
     flex: 1,

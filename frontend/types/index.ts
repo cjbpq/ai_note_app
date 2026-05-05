@@ -713,6 +713,14 @@ export interface TokenRefreshResponse {
   expires_at: string;
 }
 
+export interface UserPreferencesRequest {
+  chat_thinking_enabled: boolean;
+}
+
+export interface UserPreferencesResponse {
+  chat_thinking_enabled: boolean;
+}
+
 /**
  * 认证错误类型
  */
