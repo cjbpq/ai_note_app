@@ -143,6 +143,8 @@ export const ENDPOINTS = {
     CONVERSATION_DETAIL: (id: string) => `/chat/conversations/${id}`,
     BATCH_DELETE_CONVERSATIONS: "/chat/conversations/batch-delete",
     SEARCH_CONVERSATIONS: "/chat/conversations/search",
+    ACCEPT_SUGGESTION: (id: string) => `/chat/suggestions/${id}/accept`,
+    DISMISS_SUGGESTION: (id: string) => `/chat/suggestions/${id}/dismiss`,
   },
 } as const;
 

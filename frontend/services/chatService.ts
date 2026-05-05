@@ -12,6 +12,7 @@ import {
   ChatNoteSuggestion,
   ChatStreamEvent,
   ChatStreamRequest,
+  ChatSuggestionAcceptResponse,
   ServiceError,
   ToastType,
 } from "../types";
@@ -389,6 +390,45 @@ export const chatService = {
       throw parseServiceError(error, {
         fallbackKey: "error.chat.conversationDeleteFailed",
         statusMap: {
+          422: { key: "error.validation.invalid", toastType: "warning" },
+        },
+      });
+    }
+  },
+
+  acceptSuggestion: async (
+    suggestionId: string,
+  ): Promise<ChatSuggestionAcceptResponse> => {
+    try {
+      const response = await api.post<ChatSuggestionAcceptResponse>(
+        ENDPOINTS.CHAT.ACCEPT_SUGGESTION(suggestionId),
+      );
+      return response as unknown as ChatSuggestionAcceptResponse;
+    } catch (error) {
+      throw parseServiceError(error, {
+        fallbackKey: "error.chat.suggestionAcceptFailed",
+        statusMap: {
+          404: { key: "error.common.notFound", toastType: "error" },
+          409: { key: "error.common.conflict", toastType: "warning" },
+          422: { key: "error.validation.invalid", toastType: "warning" },
+        },
+      });
+    }
+  },
+
+  dismissSuggestion: async (
+    suggestionId: string,
+  ): Promise<ChatNoteSuggestion> => {
+    try {
+      const response = await api.post<ChatNoteSuggestion>(
+        ENDPOINTS.CHAT.DISMISS_SUGGESTION(suggestionId),
+      );
+      return normalizeSuggestion(response) as ChatNoteSuggestion;
+    } catch (error) {
+      throw parseServiceError(error, {
+        fallbackKey: "error.chat.suggestionDismissFailed",
+        statusMap: {
+          404: { key: "error.common.notFound", toastType: "error" },
           422: { key: "error.validation.invalid", toastType: "warning" },
         },
       });

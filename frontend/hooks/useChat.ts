@@ -49,6 +49,34 @@ const normalizeStoredMessage = (message: ChatMessageResponse): ChatMessage => {
   };
 };
 
+const getMessageSuggestions = (
+  metadata: Record<string, unknown> | undefined,
+): ChatNoteSuggestion[] => {
+  const rawSuggestions = metadata?.suggestions;
+  if (!Array.isArray(rawSuggestions)) return [];
+
+  return rawSuggestions.filter(
+    (suggestion): suggestion is ChatNoteSuggestion =>
+      !!suggestion &&
+      typeof suggestion === "object" &&
+      "id" in suggestion &&
+      typeof suggestion.id === "string",
+  );
+};
+
+const upsertSuggestion = (
+  suggestions: ChatNoteSuggestion[],
+  nextSuggestion: ChatNoteSuggestion,
+) => {
+  const exists = suggestions.some(
+    (suggestion) => suggestion.id === nextSuggestion.id,
+  );
+  if (!exists) return [...suggestions, nextSuggestion];
+  return suggestions.map((suggestion) =>
+    suggestion.id === nextSuggestion.id ? nextSuggestion : suggestion,
+  );
+};
+
 export const useChat = (options: UseChatOptions = {}) => {
   const { showWarning } = useToast();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -86,12 +114,34 @@ export const useChat = (options: UseChatOptions = {}) => {
     };
   }, []);
 
-  const updateAssistantMessage = useCallback(
-    (assistantId: string, patch: Partial<ChatMessage>) => {
+  const finalizeAssistantMessage = useCallback(
+    (assistantId: string, patch: Partial<ChatMessage> = {}) => {
       setMessages((prev) =>
-        prev.map((message) =>
-          message.id === assistantId ? { ...message, ...patch } : message,
-        ),
+        prev.map((message) => {
+          if (message.id !== assistantId) return message;
+
+          const nextMessage = {
+            ...message,
+            ...patch,
+            isStreaming: false,
+          };
+          const hasContent = nextMessage.content.trim().length > 0;
+          const hasSuggestions =
+            getMessageSuggestions(nextMessage.metadata).length > 0;
+
+          if (!hasContent && !hasSuggestions) {
+            return {
+              ...nextMessage,
+              status: "error",
+              content: i18next.t("chat.empty_assistant_response"),
+            };
+          }
+
+          return {
+            ...nextMessage,
+            status: "done",
+          };
+        }),
       );
     },
     [],
@@ -110,6 +160,48 @@ export const useChat = (options: UseChatOptions = {}) => {
     },
     [],
   );
+
+  const upsertAssistantSuggestion = useCallback(
+    (assistantId: string, suggestion: ChatNoteSuggestion) => {
+      setMessages((prev) =>
+        prev.map((message) => {
+          if (message.id !== assistantId) return message;
+
+          const suggestions = getMessageSuggestions(message.metadata);
+          return {
+            ...message,
+            metadata: {
+              ...(message.metadata ?? {}),
+              suggestions: upsertSuggestion(suggestions, suggestion),
+            },
+          };
+        }),
+      );
+    },
+    [],
+  );
+
+  const updateSuggestion = useCallback((suggestion: ChatNoteSuggestion) => {
+    setMessages((prev) =>
+      prev.map((message) => {
+        const suggestions = getMessageSuggestions(message.metadata);
+        if (
+          suggestions.length === 0 ||
+          !suggestions.some((item) => item.id === suggestion.id)
+        ) {
+          return message;
+        }
+
+        return {
+          ...message,
+          metadata: {
+            ...(message.metadata ?? {}),
+            suggestions: upsertSuggestion(suggestions, suggestion),
+          },
+        };
+      }),
+    );
+  }, []);
 
   const markAssistantFailed = useCallback(
     (assistantId: string, fallbackMessage: string) => {
@@ -170,6 +262,7 @@ export const useChat = (options: UseChatOptions = {}) => {
           break;
         case "note_suggestion":
           setLatestSuggestion(event.data);
+          upsertAssistantSuggestion(assistantId, event.data);
           break;
         case "done": {
           const nextConversationId = event.data.conversation_id;
@@ -177,12 +270,10 @@ export const useChat = (options: UseChatOptions = {}) => {
             conversationIdRef.current = nextConversationId;
             setConversationId(nextConversationId);
           }
-          updateAssistantMessage(assistantId, {
+          finalizeAssistantMessage(assistantId, {
             serverId: event.data.message_id,
             conversationId:
               nextConversationId ?? conversationIdRef.current ?? undefined,
-            isStreaming: false,
-            status: "done",
           });
           break;
         }
@@ -193,7 +284,7 @@ export const useChat = (options: UseChatOptions = {}) => {
           break;
       }
     },
-    [appendAssistantDelta, updateAssistantMessage],
+    [appendAssistantDelta, finalizeAssistantMessage, upsertAssistantSuggestion],
   );
 
   const stopStreaming = useCallback(() => {
@@ -291,10 +382,7 @@ export const useChat = (options: UseChatOptions = {}) => {
           },
         );
 
-        updateAssistantMessage(assistantMessage.id, {
-          isStreaming: false,
-          status: "done",
-        });
+        finalizeAssistantMessage(assistantMessage.id);
 
         return true;
       } catch (streamError) {
@@ -340,10 +428,10 @@ export const useChat = (options: UseChatOptions = {}) => {
     },
     [
       handleStreamEvent,
+      finalizeAssistantMessage,
       markAssistantFailed,
       markAssistantStopped,
       showWarning,
-      updateAssistantMessage,
     ],
   );
 
@@ -392,6 +480,7 @@ export const useChat = (options: UseChatOptions = {}) => {
     isStreaming,
     error,
     latestSuggestion,
+    updateSuggestion,
     sendMessage,
     stopStreaming,
     resetChat,

@@ -281,6 +281,11 @@ export interface ChatNoteSuggestion {
   updated_at: string;
 }
 
+export interface ChatSuggestionAcceptResponse {
+  suggestion: ChatNoteSuggestion;
+  note_id: string;
+}
+
 export interface ChatDonePayload {
   conversation_id?: string;
   message_id?: string;

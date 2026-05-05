@@ -1,6 +1,7 @@
 import { Href, useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ActivityIndicator,
   FlatList,
@@ -22,6 +23,7 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 
+import { ChatNoteSuggestionCard } from "../components/chat/chat-note-suggestion-card";
 import { ChatReferenceChipBar } from "../components/chat/chat-reference-chip-bar";
 import { ChatReferencePickerSheet } from "../components/chat/chat-reference-picker-sheet";
 import { ChatSessionDrawer } from "../components/chat/chat-session-drawer";
@@ -30,10 +32,14 @@ import { useChatConversations } from "../hooks/useChatConversations";
 import { useCategories } from "../hooks/useCategories";
 import { useNotes } from "../hooks/useNotes";
 import { useToast } from "../hooks/useToast";
+import { chatService } from "../services/chatService";
+import { noteService } from "../services/noteService";
 import {
   ChatConversationDetailResponse,
   ChatMessage,
+  ChatNoteSuggestion,
   ChatReferenceNote,
+  ServiceError,
 } from "../types";
 
 const MAX_REFERENCE_NOTES = 20;
@@ -98,6 +104,17 @@ const getReferencedNoteIds = (
   return rawIds.filter((id): id is string => typeof id === "string" && !!id);
 };
 
+const getMessageSuggestions = (
+  metadata: Record<string, unknown> | undefined,
+): ChatNoteSuggestion[] => {
+  const rawSuggestions = metadata?.suggestions;
+  if (!Array.isArray(rawSuggestions)) return [];
+  return rawSuggestions.filter(
+    (suggestion): suggestion is ChatNoteSuggestion =>
+      isRecord(suggestion) && typeof suggestion.id === "string",
+  );
+};
+
 const mergeReferences = (
   ...groups: ChatReferenceNote[][]
 ): ChatReferenceNote[] => {
@@ -114,8 +131,9 @@ export default function ChatScreen() {
   const { t } = useTranslation();
   const theme = useTheme();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
-  const { showWarning } = useToast();
+  const { showWarning, showSuccess, showError } = useToast();
   const { notes, isLoading: isNotesLoading } = useNotes();
   const { categories } = useCategories();
   const { noteId, noteTitle } = useLocalSearchParams<{
@@ -134,6 +152,12 @@ export default function ChatScreen() {
   const [isReferencePickerVisible, setIsReferencePickerVisible] =
     useState(false);
   const [isSessionDrawerVisible, setIsSessionDrawerVisible] = useState(false);
+  const [savingSuggestionId, setSavingSuggestionId] = useState<string | null>(
+    null,
+  );
+  const [dismissingSuggestionId, setDismissingSuggestionId] = useState<
+    string | null
+  >(null);
 
   const referenceNoteId = useMemo(() => {
     return Array.isArray(noteId) ? noteId[0] : noteId;
@@ -178,6 +202,7 @@ export default function ChatScreen() {
     stopStreaming,
     resetChat,
     restoreConversation,
+    updateSuggestion,
   } = useChat();
   const {
     conversations,
@@ -425,6 +450,77 @@ export default function ChatScreen() {
     setDraftReferences((prev) => prev.filter((reference) => reference.id !== id));
   }, []);
 
+  const handleAcceptSuggestion = useCallback(
+    async (suggestion: ChatNoteSuggestion) => {
+      if (savingSuggestionId || dismissingSuggestionId) return;
+
+      setSavingSuggestionId(suggestion.id);
+      try {
+        const result = await chatService.acceptSuggestion(suggestion.id);
+        updateSuggestion(result.suggestion);
+
+        const note = await noteService.getNoteById(result.note_id);
+        await noteService.syncNoteToLocal(note);
+        await queryClient.invalidateQueries({ queryKey: ["notes"] });
+        await queryClient.invalidateQueries({ queryKey: ["note"] });
+        await queryClient.invalidateQueries({ queryKey: ["categories"] });
+
+        showSuccess(t("chat.suggestion_save_success"), { duration: 1400 });
+      } catch (error) {
+        showError(
+          error instanceof ServiceError
+            ? error.message
+            : t("error.chat.suggestionAcceptFailed"),
+        );
+      } finally {
+        setSavingSuggestionId(null);
+      }
+    },
+    [
+      dismissingSuggestionId,
+      queryClient,
+      savingSuggestionId,
+      showError,
+      showSuccess,
+      t,
+      updateSuggestion,
+    ],
+  );
+
+  const handleDismissSuggestion = useCallback(
+    async (suggestion: ChatNoteSuggestion) => {
+      if (savingSuggestionId || dismissingSuggestionId) return;
+
+      setDismissingSuggestionId(suggestion.id);
+      try {
+        const dismissed = await chatService.dismissSuggestion(suggestion.id);
+        updateSuggestion(dismissed);
+      } catch (error) {
+        showError(
+          error instanceof ServiceError
+            ? error.message
+            : t("error.chat.suggestionDismissFailed"),
+        );
+      } finally {
+        setDismissingSuggestionId(null);
+      }
+    },
+    [
+      dismissingSuggestionId,
+      savingSuggestionId,
+      showError,
+      t,
+      updateSuggestion,
+    ],
+  );
+
+  const handleViewSuggestionNote = useCallback(
+    (noteId: string) => {
+      router.push(`/note/${noteId}` as Href);
+    },
+    [router],
+  );
+
   const subtitle = useMemo(() => {
     if (isStreaming) return t("chat.streaming");
     if (conversationId) return t("chat.connected");
@@ -448,6 +544,7 @@ export default function ChatScreen() {
       const isEmptyStreaming =
         item.role === "assistant" && item.isStreaming && !item.content;
       const messageReferences = getMessageReferences(item.metadata);
+      const messageSuggestions = getMessageSuggestions(item.metadata);
 
       return (
         <View
@@ -456,65 +553,92 @@ export default function ChatScreen() {
             isUser ? styles.userRow : styles.assistantRow,
           ]}
         >
-          <Surface
-            elevation={0}
+          <View
             style={[
-              styles.bubble,
-              {
-                backgroundColor: isUser
-                  ? theme.colors.primaryContainer
-                  : theme.colors.surfaceVariant,
-              },
-              isError && {
-                backgroundColor: theme.colors.errorContainer,
-              },
+              styles.messageBubbleRow,
+              isUser ? styles.userBubbleRow : styles.assistantBubbleRow,
             ]}
           >
-            {isUser && messageReferences.length > 0 ? (
-              <View style={styles.messageAttachmentBar}>
-                <ChatReferenceChipBar references={messageReferences} />
-              </View>
-            ) : null}
-            {isEmptyStreaming ? (
-              <View style={styles.loadingLine}>
-                <ActivityIndicator size="small" color={theme.colors.primary} />
+            <Surface
+              elevation={0}
+              style={[
+                styles.bubble,
+                {
+                  backgroundColor: isUser
+                    ? theme.colors.primaryContainer
+                    : theme.colors.surfaceVariant,
+                },
+                isError && {
+                  backgroundColor: theme.colors.errorContainer,
+                },
+              ]}
+            >
+              {isUser && messageReferences.length > 0 ? (
+                <View style={styles.messageAttachmentBar}>
+                  <ChatReferenceChipBar references={messageReferences} />
+                </View>
+              ) : null}
+              {isEmptyStreaming ? (
+                <View style={styles.loadingLine}>
+                  <ActivityIndicator size="small" color={theme.colors.primary} />
+                  <Text
+                    variant="bodyMedium"
+                    style={{ color: theme.colors.onSurfaceVariant }}
+                  >
+                    {t("chat.thinking")}
+                  </Text>
+                </View>
+              ) : (
                 <Text
                   variant="bodyMedium"
-                  style={{ color: theme.colors.onSurfaceVariant }}
+                  style={{
+                    color: isError
+                      ? theme.colors.onErrorContainer
+                      : isUser
+                        ? theme.colors.onPrimaryContainer
+                        : theme.colors.onSurfaceVariant,
+                  }}
                 >
-                  {t("chat.thinking")}
+                  {item.content}
                 </Text>
-              </View>
-            ) : (
-              <Text
-                variant="bodyMedium"
-                style={{
-                  color: isError
-                    ? theme.colors.onErrorContainer
-                    : isUser
-                      ? theme.colors.onPrimaryContainer
-                      : theme.colors.onSurfaceVariant,
-                }}
-              >
-                {item.content}
-              </Text>
-            )}
-            {isStopped ? (
-              <Text
-                variant="labelSmall"
-                style={[
-                  styles.statusText,
-                  { color: theme.colors.onSurfaceVariant },
-                ]}
-              >
-                {t("chat.stopped_status")}
-              </Text>
-            ) : null}
-          </Surface>
+              )}
+              {isStopped ? (
+                <Text
+                  variant="labelSmall"
+                  style={[
+                    styles.statusText,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                >
+                  {t("chat.stopped_status")}
+                </Text>
+              ) : null}
+            </Surface>
+          </View>
+          {!isUser && messageSuggestions.length > 0 ? (
+            <View style={styles.suggestionStack}>
+              {messageSuggestions.map((suggestion) => (
+                <ChatNoteSuggestionCard
+                  key={suggestion.id}
+                  suggestion={suggestion}
+                  isSaving={savingSuggestionId === suggestion.id}
+                  isDismissing={dismissingSuggestionId === suggestion.id}
+                  onAccept={handleAcceptSuggestion}
+                  onDismiss={handleDismissSuggestion}
+                  onViewNote={handleViewSuggestionNote}
+                />
+              ))}
+            </View>
+          ) : null}
         </View>
       );
     },
     [
+      dismissingSuggestionId,
+      handleAcceptSuggestion,
+      handleDismissSuggestion,
+      handleViewSuggestionNote,
+      savingSuggestionId,
       t,
       theme.colors.errorContainer,
       theme.colors.onErrorContainer,
@@ -707,13 +831,21 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   messageRow: {
-    flexDirection: "row",
     marginBottom: 12,
   },
   userRow: {
-    justifyContent: "flex-end",
+    alignItems: "stretch",
   },
   assistantRow: {
+    alignItems: "stretch",
+  },
+  messageBubbleRow: {
+    flexDirection: "row",
+  },
+  userBubbleRow: {
+    justifyContent: "flex-end",
+  },
+  assistantBubbleRow: {
     justifyContent: "flex-start",
   },
   bubble: {
@@ -733,6 +865,11 @@ const styles = StyleSheet.create({
   messageAttachmentBar: {
     marginBottom: 8,
     maxWidth: "100%",
+  },
+  suggestionStack: {
+    width: "86%",
+    marginTop: 6,
+    gap: 8,
   },
   composer: {
     borderTopWidth: StyleSheet.hairlineWidth,
