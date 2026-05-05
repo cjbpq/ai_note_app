@@ -96,7 +96,7 @@ async def read_current_user(current_user: User = Depends(get_current_user)):
 @router.get(
     "/preferences",
     response_model=UserPreferencesResponse,
-    summary="鑾峰彇鐢ㄦ埛偏好",
+    summary="获取用户偏好",
 )
 async def get_preferences(current_user: User = Depends(get_current_user)):
     return UserPreferencesResponse(chat_thinking_enabled=bool(current_user.chat_thinking_enabled))
@@ -105,7 +105,7 @@ async def get_preferences(current_user: User = Depends(get_current_user)):
 @router.put(
     "/preferences",
     response_model=UserPreferencesResponse,
-    summary="鏇存柊鐢ㄦ埛偏好",
+    summary="保存用户偏好",
 )
 async def update_preferences(
     request: UserPreferencesRequest,
