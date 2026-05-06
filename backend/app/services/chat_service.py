@@ -6,6 +6,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 from typing import Any, Dict, Iterable, List, Literal, Optional
 
 from sqlalchemy import func, or_
@@ -50,6 +51,26 @@ NOTE_WORTHY_MARKERS = (
     "写入知识库",
     "加入知识库",
     "保存到知识库",
+)
+NOTE_GENERATION_MARKERS = (
+    "帮我做",
+    "做一篇",
+    "写一篇",
+    "生成一条",
+    "生成一张",
+    "生成一份",
+    "生成一篇",
+    "帮我整理",
+    "整理成",
+    "整理为",
+    "整理一条",
+    "整理一份",
+    "整理一篇",
+    "沉淀",
+    "知识库",
+    "保存",
+    "记录",
+    "tool_calling",
 )
 SUBJECT_CATEGORY_MARKERS = (
     ("物理", ("物理", "电磁", "力学", "热学", "光学", "量子")),
@@ -171,7 +192,7 @@ def classify_chat_intent(message: str) -> ChatIntent:
 
     if any(marker in text for marker in NOTE_WORTHY_MARKERS):
         return "out_of_scope_note_worthy"
-    if "笔记" in text and any(marker in text for marker in ("帮我做", "做一篇", "写一篇", "生成", "整理", "沉淀", "知识库", "tool_calling")):
+    if "笔记" in text and any(marker in text for marker in NOTE_GENERATION_MARKERS):
         return "out_of_scope_note_worthy"
 
     question_markers = (
@@ -183,9 +204,15 @@ def classify_chat_intent(message: str) -> ChatIntent:
         "为什么",
         "是否",
         "解释",
+        "讲讲",
+        "说说",
+        "介绍",
         "总结",
         "归纳",
         "复习",
+        "原理",
+        "应用场景",
+        "局限性",
         "根据",
         "查找",
         "搜索",
@@ -210,8 +237,6 @@ def classify_chat_intent(message: str) -> ChatIntent:
     if lower in casual_exact or text in casual_exact:
         return "chat"
 
-    if len(text) >= 80:
-        return "out_of_scope_note_worthy"
     return "chat"
 
 
@@ -221,8 +246,8 @@ def should_enable_note_suggestion_tool(
     references: List[Dict[str, Any]],
     message_length: Optional[int] = None,
 ) -> bool:
-    _ = (intent, references, message_length)
-    return True
+    _ = (references, message_length)
+    return intent == "out_of_scope_note_worthy"
 
 
 class ChatService:
@@ -661,6 +686,50 @@ class ChatService:
         self.db.refresh(suggestion)
         return suggestion
 
+    @classmethod
+    def _validate_note_suggestion_payload(
+        cls,
+        *,
+        title: str,
+        content: str,
+        raw_tags: Any,
+        normalized_tags: List[str],
+        source_message: str,
+    ) -> Optional[str]:
+        if not title:
+            return "笔记标题为空。"
+        if len(cls._clean_inline_text(content)) < 8:
+            return "笔记内容过短。"
+        if raw_tags is not None and not isinstance(raw_tags, list):
+            return "标签必须是数组。"
+        if isinstance(raw_tags, list) and raw_tags and not normalized_tags:
+            return "标签内容无效。"
+        if cls._is_low_value_repetition(content=content, source_message=source_message):
+            return "笔记内容与用户输入高度重复，缺少可保存的整理信息。"
+        return None
+
+    @classmethod
+    def _is_low_value_repetition(cls, *, content: str, source_message: str) -> bool:
+        content_key = cls._similarity_key(content)
+        source_key = cls._similarity_key(source_message)
+        if len(content_key) < 12 or len(source_key) < 12:
+            return False
+
+        has_structure = bool(
+            re.search(r"(^|\n)\s*(?:#{1,6}\s+|[-*]\s+|\d+[.)、]\s+)", content)
+            or "\n" in content.strip()
+        )
+        if has_structure:
+            return False
+
+        ratio = SequenceMatcher(None, content_key, source_key).ratio()
+        return ratio >= 0.92 and len(content_key) <= int(len(source_key) * 1.2)
+
+    @staticmethod
+    def _similarity_key(text: str) -> str:
+        value = str(text or "").lower()
+        return re.sub(r"[\s:：,，.。!！?？;；、()（）\[\]【】{}《》<>\"'`*_#\-]+", "", value)
+
     def execute_note_suggestion_tool(
         self,
         *,
@@ -677,8 +746,20 @@ class ChatService:
             return ToolCallResult(kind="invalid_args")
 
         content = self._clean_note_content(args.get("content"))
-        if len(content) < 4:
-            return ToolCallResult(kind="invalid_args")
+        title = self._clean_inline_text(args.get("title"))[:255]
+        category = self._clean_inline_text(args.get("category")) or None
+        raw_tags = args.get("tags")
+        tags = self._normalize_tags(raw_tags if isinstance(raw_tags, list) else [])
+        reason = self._clean_inline_text(args.get("reason")) or None
+        validation_error = self._validate_note_suggestion_payload(
+            title=title,
+            content=content,
+            raw_tags=raw_tags,
+            normalized_tags=tags,
+            source_message=source_message,
+        )
+        if validation_error:
+            return ToolCallResult(kind="invalid_args", message=validation_error)
 
         tool_call_id = self._clean_inline_text(tool_call.get("id"))
         if tool_call_id:
@@ -689,11 +770,6 @@ class ChatService:
             ):
                 if str(existing.conversation_id) == str(conversation_id):
                     return ToolCallResult(kind="suggestion_created", suggestion=existing)
-
-        title = self._clean_inline_text(args.get("title"))[:255] or self._suggestion_title(content)
-        category = self._clean_inline_text(args.get("category")) or None
-        tags = self._normalize_tags(args.get("tags") if isinstance(args.get("tags"), list) else [])
-        reason = self._clean_inline_text(args.get("reason")) or None
 
         try:
             suggestion = self.create_note_suggestion(

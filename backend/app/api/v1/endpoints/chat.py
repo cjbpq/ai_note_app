@@ -233,6 +233,8 @@ async def stream_chat(
 
                     kind, text, data = _stream_event_parts(payload)
                     if kind == "tool_call":
+                        if not note_tool_enabled:
+                            continue
                         tool_call = data or {}
                         if isinstance(tool_call, dict):
                             round_tool_calls.append(tool_call)
