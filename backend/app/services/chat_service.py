@@ -99,19 +99,68 @@ WEB_SEARCH_MARKERS = (
     "最新",
     "新闻",
 )
-NOTE_OFFER_CONFIRM_MARKERS = (
+NOTE_OFFER_CONFIRM_EXACT_MESSAGES = (
     "需要",
+    "需要的",
+    "要",
     "可以",
+    "可以的",
     "好的",
     "好",
+    "行",
+    "行的",
+    "嗯",
+    "嗯嗯",
+    "对",
+    "是",
+    "是的",
     "生成",
     "整理",
-    "做成",
-    "转成",
     "保存",
-    "记一下",
+    "yes",
+    "ok",
+    "okay",
+)
+NOTE_OFFER_CONFIRM_ACTION_MARKERS = (
+    "帮我做",
+    "请帮我做",
+    "能帮我做",
+    "可以帮我做",
+    "你能帮我做",
+    "做吧",
+    "开始做",
+    "帮我弄",
+    "那就做",
+    "那你做",
+    "按这个做",
+    "帮我生成",
+    "请帮我生成",
+    "能帮我生成",
+    "可以帮我生成",
+    "生成吧",
     "生成笔记",
+    "生成一份笔记",
+    "生成一条笔记",
+    "生成一篇笔记",
+    "帮我整理",
+    "请帮我整理",
+    "能帮我整理",
+    "可以帮我整理",
+    "整理吧",
     "整理成笔记",
+    "整理为笔记",
+    "做成笔记",
+    "转成笔记",
+    "保存为笔记",
+    "保存成笔记",
+    "保存到笔记",
+    "帮我保存",
+    "请帮我保存",
+    "能帮我保存",
+    "可以帮我保存",
+    "保存吧",
+    "记一下",
+    "记录一下",
 )
 NOTE_OFFER_REJECT_MARKERS = (
     "不需要",
@@ -132,6 +181,18 @@ NOTE_OFFER_TRIGGER_MARKERS = (
     "分析",
     "介绍",
     "说说",
+)
+NOTE_CREATION_CONTEXT_MARKERS = (
+    "适合添加为笔记",
+    "适合添加为你的",
+    "添加为笔记",
+    "加入笔记",
+    "生成一份笔记",
+    "生成笔记",
+    "结构化笔记",
+    "整理成笔记",
+    "保存使用",
+    "可直接保存",
 )
 SUBJECT_CATEGORY_MARKERS = (
     ("物理", ("物理", "电磁", "力学", "热学", "光学", "量子")),
@@ -354,7 +415,10 @@ def is_note_offer_confirmation(message: str) -> bool:
         return False
     if any(marker in text for marker in NOTE_OFFER_REJECT_MARKERS):
         return False
-    return any(marker in text for marker in NOTE_OFFER_CONFIRM_MARKERS)
+    normalized = text.strip("。！？!?，,、. ")
+    if normalized.lower() in NOTE_OFFER_CONFIRM_EXACT_MESSAGES:
+        return True
+    return any(marker in text for marker in NOTE_OFFER_CONFIRM_ACTION_MARKERS)
 
 
 def _looks_like_new_question(text: str) -> bool:
@@ -376,6 +440,20 @@ def should_offer_note_generation(*, message: str, intent: ChatIntent, note_tool_
         return has_offer_action
     study_markers = ("学习法", "知识点", "概念", "公式", "定理", "方法", "原理", "历史", "数学", "物理", "化学", "英语", "语文", "生物")
     return has_offer_action and any(marker in text for marker in study_markers)
+
+
+def is_note_creation_followup(message: str) -> bool:
+    text = " ".join(str(message or "").strip().split())
+    if not text:
+        return False
+    if any(marker in text for marker in NOTE_OFFER_REJECT_MARKERS):
+        return False
+    if any(marker in text for marker in NOTE_OFFER_CONFIRM_ACTION_MARKERS):
+        return True
+    if _looks_like_new_question(text):
+        return False
+    normalized = text.strip("。！？!?，,、. ")
+    return normalized.lower() in NOTE_OFFER_CONFIRM_EXACT_MESSAGES
 
 
 class ChatService:
@@ -490,6 +568,28 @@ class ChatService:
                 "source_user_message": metadata.get("note_offer_source_message") or "",
             }
         return None
+
+    def has_recent_note_creation_context(self, *, user_id: str, conversation_id: str) -> bool:
+        messages = (
+            self.db.query(ChatMessage)
+            .filter(
+                ChatMessage.user_id == user_id,
+                ChatMessage.conversation_id == str(conversation_id),
+            )
+            .order_by(ChatMessage.sequence.desc())
+            .limit(6)
+            .all()
+        )
+        for message in messages:
+            if message.role not in {"user", "assistant"}:
+                continue
+            content = message.content or ""
+            metadata = message.message_metadata or {}
+            if isinstance(metadata, dict) and metadata.get("note_offer_pending"):
+                return True
+            if any(marker in content for marker in NOTE_CREATION_CONTEXT_MARKERS):
+                return True
+        return False
 
     def add_message(
         self,
