@@ -43,13 +43,27 @@ const normalizeStoredMessage = (message: ChatMessageResponse): ChatMessage => {
     content: message.content,
     sequence: message.sequence,
     metadata: message.metadata,
+    suggestions: normalizeSuggestions(message.suggestions),
     createdAt: message.created_at,
     status: "done",
     isLocal: false,
   };
 };
 
-const getMessageSuggestions = (
+const normalizeSuggestions = (
+  suggestions: ChatNoteSuggestion[] | undefined,
+): ChatNoteSuggestion[] => {
+  if (!Array.isArray(suggestions)) return [];
+  return suggestions.filter(
+    (suggestion): suggestion is ChatNoteSuggestion =>
+      !!suggestion &&
+      typeof suggestion === "object" &&
+      "id" in suggestion &&
+      typeof suggestion.id === "string",
+  );
+};
+
+const getMetadataSuggestions = (
   metadata: Record<string, unknown> | undefined,
 ): ChatNoteSuggestion[] => {
   const rawSuggestions = metadata?.suggestions;
@@ -62,6 +76,12 @@ const getMessageSuggestions = (
       "id" in suggestion &&
       typeof suggestion.id === "string",
   );
+};
+
+const getMessageSuggestions = (message: ChatMessage): ChatNoteSuggestion[] => {
+  const suggestions = normalizeSuggestions(message.suggestions);
+  if (suggestions.length > 0) return suggestions;
+  return getMetadataSuggestions(message.metadata);
 };
 
 const upsertSuggestion = (
@@ -126,8 +146,7 @@ export const useChat = (options: UseChatOptions = {}) => {
             isStreaming: false,
           };
           const hasContent = nextMessage.content.trim().length > 0;
-          const hasSuggestions =
-            getMessageSuggestions(nextMessage.metadata).length > 0;
+          const hasSuggestions = getMessageSuggestions(nextMessage).length > 0;
 
           if (!hasContent && !hasSuggestions) {
             return {
@@ -167,9 +186,10 @@ export const useChat = (options: UseChatOptions = {}) => {
         prev.map((message) => {
           if (message.id !== assistantId) return message;
 
-          const suggestions = getMessageSuggestions(message.metadata);
+          const suggestions = getMessageSuggestions(message);
           return {
             ...message,
+            suggestions: upsertSuggestion(suggestions, suggestion),
             metadata: {
               ...(message.metadata ?? {}),
               suggestions: upsertSuggestion(suggestions, suggestion),
@@ -184,7 +204,7 @@ export const useChat = (options: UseChatOptions = {}) => {
   const updateSuggestion = useCallback((suggestion: ChatNoteSuggestion) => {
     setMessages((prev) =>
       prev.map((message) => {
-        const suggestions = getMessageSuggestions(message.metadata);
+        const suggestions = getMessageSuggestions(message);
         if (
           suggestions.length === 0 ||
           !suggestions.some((item) => item.id === suggestion.id)
@@ -194,6 +214,7 @@ export const useChat = (options: UseChatOptions = {}) => {
 
         return {
           ...message,
+          suggestions: upsertSuggestion(suggestions, suggestion),
           metadata: {
             ...(message.metadata ?? {}),
             suggestions: upsertSuggestion(suggestions, suggestion),

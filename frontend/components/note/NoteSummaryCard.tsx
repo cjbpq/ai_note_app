@@ -3,10 +3,13 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, View } from "react-native";
 import { Surface, Text, useTheme } from "react-native-paper";
-import { MathAwareText } from "../common/MathAwareText";
+import {
+  getStructuredRichTextContent,
+  StructuredRichText,
+} from "../common/StructuredRichText";
 
 interface NoteSummaryCardProps {
-  summary?: string;
+  summary?: unknown;
 }
 
 export const NoteSummaryCard: React.FC<NoteSummaryCardProps> = ({
@@ -28,7 +31,9 @@ export const NoteSummaryCard: React.FC<NoteSummaryCardProps> = ({
         foreground: theme.colors.primary,
       };
 
-  if (!summary) return null;
+  const renderableSummary = getStructuredRichTextContent(summary);
+
+  if (!renderableSummary.trim()) return null;
 
   return (
     <Surface
@@ -63,8 +68,8 @@ export const NoteSummaryCard: React.FC<NoteSummaryCardProps> = ({
       </View>
 
       <View style={styles.content}>
-        <MathAwareText
-          content={summary}
+        <StructuredRichText
+          content={renderableSummary}
           variant="bodyMedium"
           textStyle={{ color: theme.colors.onSurface, lineHeight: 23 }}
           fontSize={15}

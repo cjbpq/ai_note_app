@@ -4,7 +4,10 @@ import { useTranslation } from "react-i18next";
 import { StyleSheet, View } from "react-native";
 import { Surface, Text, useTheme } from "react-native-paper";
 import { toSafeStringArray } from "../../utils/safeData";
-import { MathAwareText } from "../common/MathAwareText";
+import {
+  getStructuredRichTextContent,
+  StructuredRichText,
+} from "../common/StructuredRichText";
 
 interface NoteWarningsProps {
   warnings?: string[];
@@ -13,7 +16,9 @@ interface NoteWarningsProps {
 export const NoteWarnings: React.FC<NoteWarningsProps> = ({ warnings }) => {
   const { t } = useTranslation();
   const theme = useTheme();
-  const safeWarnings = toSafeStringArray(warnings);
+  const safeWarnings = toSafeStringArray(warnings)
+    .map(getStructuredRichTextContent)
+    .filter((warning) => warning.trim().length > 0);
   const warningColors = theme.dark
     ? {
         background: "rgba(251, 191, 36, 0.12)",
@@ -57,7 +62,7 @@ export const NoteWarnings: React.FC<NoteWarningsProps> = ({ warnings }) => {
 
       <View style={styles.warningList}>
         {safeWarnings.map((warning, index) => (
-          <MathAwareText
+          <StructuredRichText
             key={`warn-${index}`}
             content={warning}
             variant="bodySmall"

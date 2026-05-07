@@ -12,6 +12,7 @@ import {
   ChatNoteSuggestion,
   ChatStreamEvent,
   ChatStreamRequest,
+  ChatSuggestionAcceptRequest,
   ChatSuggestionAcceptResponse,
   ServiceError,
   ToastType,
@@ -398,12 +399,18 @@ export const chatService = {
 
   acceptSuggestion: async (
     suggestionId: string,
+    body?: ChatSuggestionAcceptRequest,
   ): Promise<ChatSuggestionAcceptResponse> => {
     try {
       const response = await api.post<ChatSuggestionAcceptResponse>(
         ENDPOINTS.CHAT.ACCEPT_SUGGESTION(suggestionId),
+        body ?? undefined,
       );
-      return response as unknown as ChatSuggestionAcceptResponse;
+      const rawResponse = response as unknown as ChatSuggestionAcceptResponse;
+      return {
+        ...rawResponse,
+        suggestion: normalizeSuggestion(rawResponse.suggestion),
+      };
     } catch (error) {
       throw parseServiceError(error, {
         fallbackKey: "error.chat.suggestionAcceptFailed",

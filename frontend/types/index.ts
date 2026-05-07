@@ -179,6 +179,7 @@ export interface ChatMessage {
   content: string;
   sequence?: number;
   metadata?: Record<string, unknown>;
+  suggestions?: ChatNoteSuggestion[];
   createdAt: string;
   status?: ChatMessageStatus;
   isStreaming?: boolean;
@@ -201,6 +202,7 @@ export interface ChatMessageResponse {
   content: string;
   sequence: number;
   metadata?: Record<string, unknown>;
+  suggestions?: ChatNoteSuggestion[];
   created_at: string;
 }
 
@@ -284,6 +286,10 @@ export interface ChatNoteSuggestion {
 export interface ChatSuggestionAcceptResponse {
   suggestion: ChatNoteSuggestion;
   note_id: string;
+}
+
+export interface ChatSuggestionAcceptRequest {
+  category?: string | null;
 }
 
 export interface ChatDonePayload {
