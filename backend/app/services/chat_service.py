@@ -19,11 +19,13 @@ from app.services.doubao_chat_service import DoubaoChatService, doubao_chat_serv
 from app.services.note_index_service import NoteIndexService, try_index_note
 from app.services.note_service import NoteService
 from app.services.nexoradb_service import NexoraDBClient, NexoraDBError, NexoraDBHit, nexoradb_client
+from app.services.web_search_service import WebSearchError, WebSearchService, web_search_service
 
 logger = logging.getLogger(__name__)
 
 ChatIntent = Literal["chat", "note_question", "out_of_scope_note_worthy"]
 NOTE_SUGGESTION_TOOL_NAME = "propose_note"
+WEB_SEARCH_TOOL_NAME = "web_search"
 TOKEN_ESTIMATE_CHARS_PER_TOKEN = 2
 CONTEXT_SAFETY_MARGIN_TOKENS = 1024
 NOTE_WORTHY_MARKERS = (
@@ -72,6 +74,65 @@ NOTE_GENERATION_MARKERS = (
     "记录",
     "tool_calling",
 )
+NOTE_EXTENSION_MARKERS = (
+    "拓展笔记",
+    "扩展笔记",
+    "拓展成笔记",
+    "扩展成笔记",
+    "补充笔记",
+    "延伸笔记",
+    "同类型的笔记",
+    "相同类型的笔记",
+    "同类型的拓展",
+    "相同类型的拓展",
+)
+WEB_SEARCH_MARKERS = (
+    "联网",
+    "网络上",
+    "网上",
+    "互联网",
+    "网页",
+    "web",
+    "上网",
+    "外部资料",
+    "公开资料",
+    "最新",
+    "新闻",
+)
+NOTE_OFFER_CONFIRM_MARKERS = (
+    "需要",
+    "可以",
+    "好的",
+    "好",
+    "生成",
+    "整理",
+    "做成",
+    "转成",
+    "保存",
+    "记一下",
+    "生成笔记",
+    "整理成笔记",
+)
+NOTE_OFFER_REJECT_MARKERS = (
+    "不需要",
+    "不用",
+    "不要",
+    "先不用",
+    "算了",
+    "否",
+)
+NOTE_OFFER_TRIGGER_MARKERS = (
+    "讲讲",
+    "讲一下",
+    "讲解",
+    "解释",
+    "总结",
+    "归纳",
+    "复习",
+    "分析",
+    "介绍",
+    "说说",
+)
 SUBJECT_CATEGORY_MARKERS = (
     ("物理", ("物理", "电磁", "力学", "热学", "光学", "量子")),
     ("数学", ("数学", "函数", "极限", "导数", "积分", "线代", "概率", "几何")),
@@ -92,9 +153,10 @@ class ChatAccessError(PermissionError):
 
 @dataclass
 class ToolCallResult:
-    kind: Literal["suggestion_created", "invalid_args", "error"]
+    kind: Literal["suggestion_created", "web_search_result", "invalid_args", "error"]
     suggestion: Optional[ChatNoteSuggestion] = None
     message: str = ""
+    data: Optional[Dict[str, Any]] = None
 
     def as_dict(self) -> Dict[str, Any]:
         if self.kind == "suggestion_created" and self.suggestion is not None:
@@ -104,6 +166,11 @@ class ToolCallResult:
                 "title": self.suggestion.title,
                 "message": "笔记建议已生成，等待用户确认。",
             }
+        if self.kind == "web_search_result":
+            payload = {"status": "ok", **(self.data or {})}
+            if self.message:
+                payload["message"] = self.message
+            return payload
         if self.kind == "invalid_args":
             return {
                 "status": "invalid_args",
@@ -190,9 +257,7 @@ def classify_chat_intent(message: str) -> ChatIntent:
     if not text:
         return "chat"
 
-    if any(marker in text for marker in NOTE_WORTHY_MARKERS):
-        return "out_of_scope_note_worthy"
-    if "笔记" in text and any(marker in text for marker in NOTE_GENERATION_MARKERS):
+    if _has_explicit_note_creation_intent(text):
         return "out_of_scope_note_worthy"
 
     question_markers = (
@@ -240,6 +305,22 @@ def classify_chat_intent(message: str) -> ChatIntent:
     return "chat"
 
 
+def _has_explicit_note_creation_intent(text: str) -> bool:
+    if any(marker in text for marker in NOTE_WORTHY_MARKERS):
+        return True
+    if "笔记" not in text:
+        return False
+    if any(marker in text for marker in NOTE_GENERATION_MARKERS):
+        return True
+    if any(marker in text for marker in NOTE_EXTENSION_MARKERS):
+        return True
+    if any(marker in text for marker in ("拓展", "扩展", "补充", "延伸")) and any(
+        marker in text for marker in ("同类型", "相同类型", "相关", "类似")
+    ):
+        return True
+    return False
+
+
 def should_enable_note_suggestion_tool(
     *,
     intent: ChatIntent,
@@ -250,6 +331,53 @@ def should_enable_note_suggestion_tool(
     return intent == "out_of_scope_note_worthy"
 
 
+def should_enable_web_search_tool(*, message: str, intent: ChatIntent) -> bool:
+    _ = intent
+    text = " ".join(str(message or "").strip().split())
+    lower = text.lower()
+    if not text:
+        return False
+    if "http://" in lower or "https://" in lower or "www." in lower:
+        return True
+    if any(marker in lower for marker in ("google", "bing", "duckduckgo")):
+        return True
+    if any(marker in text for marker in WEB_SEARCH_MARKERS):
+        return True
+    search_markers = ("搜索", "搜一下", "查一下", "检索")
+    local_note_markers = ("我的笔记", "现有笔记", "已有笔记", "当前笔记")
+    return any(marker in text for marker in search_markers) and not any(marker in text for marker in local_note_markers)
+
+
+def is_note_offer_confirmation(message: str) -> bool:
+    text = " ".join(str(message or "").strip().split())
+    if not text:
+        return False
+    if any(marker in text for marker in NOTE_OFFER_REJECT_MARKERS):
+        return False
+    return any(marker in text for marker in NOTE_OFFER_CONFIRM_MARKERS)
+
+
+def _looks_like_new_question(text: str) -> bool:
+    return "?" in text or "？" in text or any(marker in text for marker in ("什么", "如何", "怎么", "为什么", "是否", "吗"))
+
+
+def should_offer_note_generation(*, message: str, intent: ChatIntent, note_tool_enabled: bool) -> bool:
+    if note_tool_enabled or intent == "out_of_scope_note_worthy":
+        return False
+    text = " ".join(str(message or "").strip().split())
+    if not text:
+        return False
+    if is_note_offer_confirmation(text) and not _looks_like_new_question(text):
+        return False
+    if len(text) < 4:
+        return False
+    has_offer_action = any(marker in text for marker in NOTE_OFFER_TRIGGER_MARKERS)
+    if intent == "note_question":
+        return has_offer_action
+    study_markers = ("学习法", "知识点", "概念", "公式", "定理", "方法", "原理", "历史", "数学", "物理", "化学", "英语", "语文", "生物")
+    return has_offer_action and any(marker in text for marker in study_markers)
+
+
 class ChatService:
     def __init__(
         self,
@@ -257,10 +385,12 @@ class ChatService:
         *,
         vector_client: Optional[NexoraDBClient] = None,
         model_service: Optional[DoubaoChatService] = None,
+        web_search_client: Optional[WebSearchService] = None,
     ) -> None:
         self.db = db
         self.vector_client = vector_client or nexoradb_client
         self.model_service = model_service or doubao_chat_service
+        self.web_search_client = web_search_client or web_search_service
 
     # ── Conversation persistence ─────────────────────────────────────
 
@@ -336,6 +466,30 @@ class ChatService:
             .order_by(ChatMessage.sequence.asc())
             .all()
         )
+
+    def get_latest_note_offer(self, *, user_id: str, conversation_id: str) -> Optional[Dict[str, Any]]:
+        messages = (
+            self.db.query(ChatMessage)
+            .filter(
+                ChatMessage.user_id == user_id,
+                ChatMessage.conversation_id == str(conversation_id),
+            )
+            .order_by(ChatMessage.sequence.desc())
+            .limit(6)
+            .all()
+        )
+        for message in messages:
+            if message.role != "assistant":
+                continue
+            metadata = message.message_metadata or {}
+            if not isinstance(metadata, dict) or not metadata.get("note_offer_pending"):
+                continue
+            return {
+                "assistant_message_id": str(message.id),
+                "assistant_content": message.content,
+                "source_user_message": metadata.get("note_offer_source_message") or "",
+            }
+        return None
 
     def add_message(
         self,
@@ -474,11 +628,12 @@ class ChatService:
         top_k: Optional[int] = None,
         query_vector: bool = True,
     ) -> List[Dict[str, Any]]:
+        requested_note_ids = [str(item) for item in referenced_note_ids]
         explicit_references = self._dedupe_references(
-            self._references_from_explicit_notes(user_id=user_id, note_ids=list(referenced_note_ids))
+            self._references_from_explicit_notes(user_id=user_id, note_ids=requested_note_ids)
         )
 
-        if not query_vector:
+        if requested_note_ids or not query_vector:
             return self._strip_internal_reference_flags(explicit_references)
 
         configured_top_k = int(top_k or settings.CHAT_RAG_TOP_K)
@@ -505,6 +660,7 @@ class ChatService:
         intent: ChatIntent,
         references: List[Dict[str, Any]],
         note_tool_enabled: bool = False,
+        web_search_enabled: bool = False,
         force_compact: bool = False,
         force_reference_summary: bool = False,
     ) -> List[Dict[str, str]]:
@@ -527,6 +683,7 @@ class ChatService:
             references=model_references,
             reference_summary=reference_summary,
             note_tool_enabled=note_tool_enabled,
+            web_search_enabled=web_search_enabled,
         )
         if force_reference_summary or self._estimate_messages_tokens(messages) > self._max_input_tokens():
             compacted = False
@@ -541,6 +698,7 @@ class ChatService:
                     references=model_references,
                     reference_summary=reference_summary,
                     note_tool_enabled=note_tool_enabled,
+                    web_search_enabled=web_search_enabled,
                 )
 
         if (force_reference_summary or self._estimate_messages_tokens(messages) > self._max_input_tokens()) and references:
@@ -552,6 +710,7 @@ class ChatService:
                 references=[],
                 reference_summary=reference_summary,
                 note_tool_enabled=note_tool_enabled,
+                web_search_enabled=web_search_enabled,
             )
 
         if self._estimate_messages_tokens(messages) > self._max_input_tokens():
@@ -643,6 +802,49 @@ class ChatService:
                 },
             }
         ]
+
+    @staticmethod
+    def build_web_search_tools() -> List[Dict[str, Any]]:
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": WEB_SEARCH_TOOL_NAME,
+                    "description": (
+                        "当用户明确要求联网、上网、到网络上搜索、查找最新或外部公开资料时调用。"
+                        "返回搜索结果标题、链接和摘要；不要用于搜索用户自己的本地笔记。"
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "要联网搜索的关键词或问题，尽量具体。",
+                            },
+                            "max_results": {
+                                "type": "integer",
+                                "description": "返回结果数量，1-8，默认5。",
+                            },
+                        },
+                        "required": ["query"],
+                    },
+                },
+            }
+        ]
+
+    @classmethod
+    def build_chat_tools(
+        cls,
+        *,
+        note_suggestion_enabled: bool,
+        web_search_enabled: bool,
+    ) -> List[Dict[str, Any]]:
+        tools: List[Dict[str, Any]] = []
+        if web_search_enabled:
+            tools.extend(cls.build_web_search_tools())
+        if note_suggestion_enabled:
+            tools.extend(cls.build_note_suggestion_tools())
+        return tools
 
     def create_note_suggestion(
         self,
@@ -793,6 +995,78 @@ class ChatService:
             return ToolCallResult(kind="error", message=str(exc))
 
         return ToolCallResult(kind="suggestion_created", suggestion=suggestion)
+
+    def execute_web_search_tool(
+        self,
+        *,
+        tool_call: Dict[str, Any],
+        source_message: str,
+    ) -> ToolCallResult:
+        if self._tool_call_name(tool_call) != WEB_SEARCH_TOOL_NAME:
+            return ToolCallResult(kind="invalid_args", message="未知工具调用。")
+
+        args = self._parse_tool_call_arguments(tool_call)
+        if args is None:
+            return ToolCallResult(kind="invalid_args")
+
+        query = self._clean_inline_text(args.get("query")) or self._clean_inline_text(source_message)
+        if not query:
+            return ToolCallResult(kind="invalid_args", message="搜索关键词为空。")
+
+        try:
+            max_results = int(args.get("max_results") or settings.WEB_SEARCH_MAX_RESULTS)
+        except (TypeError, ValueError):
+            max_results = int(settings.WEB_SEARCH_MAX_RESULTS or 5)
+        max_results = max(1, min(max_results, 8))
+
+        try:
+            results = self.web_search_client.search(query=query, max_results=max_results)
+        except WebSearchError as exc:
+            return ToolCallResult(kind="error", message=str(exc))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Failed to execute web_search tool")
+            return ToolCallResult(kind="error", message=str(exc))
+
+        return ToolCallResult(
+            kind="web_search_result",
+            data={
+                "query": query,
+                "results": results,
+                "result_count": len(results),
+            },
+        )
+
+    def execute_tool_call(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        tool_call: Dict[str, Any],
+        source_message: str,
+    ) -> ToolCallResult:
+        tool_name = self._tool_call_name(tool_call)
+        if tool_name == NOTE_SUGGESTION_TOOL_NAME:
+            return self.execute_note_suggestion_tool(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                tool_call=tool_call,
+                source_message=source_message,
+            )
+        if tool_name == WEB_SEARCH_TOOL_NAME:
+            return self.execute_web_search_tool(tool_call=tool_call, source_message=source_message)
+        return ToolCallResult(kind="invalid_args", message="未知工具调用。")
+
+    def is_tool_call_enabled(
+        self,
+        tool_call: Dict[str, Any],
+        *,
+        note_tool_enabled: bool,
+        web_search_enabled: bool,
+    ) -> bool:
+        tool_name = self._tool_call_name(tool_call)
+        return (tool_name == NOTE_SUGGESTION_TOOL_NAME and note_tool_enabled) or (
+            tool_name == WEB_SEARCH_TOOL_NAME and web_search_enabled
+        )
 
     def create_note_suggestion_from_tool_calls(
         self,
@@ -1267,11 +1541,13 @@ class ChatService:
         references: List[Dict[str, Any]],
         reference_summary: Optional[str],
         note_tool_enabled: bool,
+        web_search_enabled: bool,
     ) -> List[Dict[str, str]]:
         system_prompt = self._build_context_system_prompt(
             intent=intent,
             has_references=bool(references or reference_summary),
             note_tool_enabled=note_tool_enabled,
+            web_search_enabled=web_search_enabled,
         )
         messages: List[Dict[str, str]] = [{"role": "system", "content": system_prompt}]
         if references:
@@ -1310,6 +1586,7 @@ class ChatService:
         intent: ChatIntent,
         has_references: bool,
         note_tool_enabled: bool,
+        web_search_enabled: bool,
     ) -> str:
         base = (
             "你是 AI Note 的笔记对话助手。请使用简体中文，回答要清晰、准确、可执行。"
@@ -1319,6 +1596,11 @@ class ChatService:
             base += (
                 "如果可用工具包含 propose_note，只在本轮用户输入或你的回答形成明确、可独立保存的学习笔记内容时调用；"
                 "普通寒暄、泛泛问答、内容不足或用户不想保存时不要调用。"
+            )
+        if web_search_enabled:
+            base += (
+                "如果可用工具包含 web_search，只在用户明确要求联网或外部搜索时调用；"
+                "使用搜索结果时要基于工具返回内容回答，不要伪造来源。"
             )
         if has_references:
             return base + "当前对话已提供笔记资料，请优先根据资料回答；资料不足时再说明不确定。"
