@@ -65,6 +65,12 @@ class Settings(BaseSettings):
     CHAT_COMPACT_KEEP_RECENT_MESSAGES: int = 12
     CHAT_STREAM_HEARTBEAT_SECONDS: int = 12
 
+    # Web search tool configuration
+    WEB_SEARCH_ENABLED: bool = True
+    WEB_SEARCH_PROVIDER: str = "duckduckgo"
+    WEB_SEARCH_TIMEOUT_SECONDS: float = 8.0
+    WEB_SEARCH_MAX_RESULTS: int = 5
+
     # Doubao configuration
     USE_DOUBAO_PIPELINE: bool = True
     DOUBAO_API_KEY: Optional[str] = Field(

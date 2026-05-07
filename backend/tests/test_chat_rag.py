@@ -7,9 +7,9 @@ import pytest
 
 from app.database import SessionLocal
 from app.models.note import Note
-from app.services.chat_service import ChatService, classify_chat_intent
+from app.services.chat_service import ChatService, classify_chat_intent, should_enable_web_search_tool
 from app.services.doubao_chat_service import StreamEvent
-from app.services.nexoradb_service import NexoraDBClient, NexoraDBError
+from app.services.nexoradb_service import NexoraDBClient, NexoraDBError, NexoraDBHit
 from app.services.note_index_service import NoteIndexService
 from app.services.note_service import NoteService
 
@@ -20,6 +20,7 @@ class FakeVectorClient:
     def __init__(self):
         self.upserts = []
         self.queries = []
+        self.query_hits = []
         self.deleted_notes = []
 
     def upsert_texts(self, *, user_id, items, library="notes"):
@@ -29,11 +30,27 @@ class FakeVectorClient:
 
     def query_text(self, *, user_id, text, top_k, where=None, library="notes"):
         self.queries.append({"user_id": user_id, "text": text, "top_k": top_k, "where": where, "library": library})
-        return []
+        return list(self.query_hits)
 
     def delete_note(self, *, user_id, note_id):
         self.deleted_notes.append((user_id, note_id))
         return True
+
+
+class FakeWebSearchClient:
+    def __init__(self):
+        self.searches = []
+        self.results = [
+            {
+                "title": "甲午中日战争 - 百科资料",
+                "url": "https://example.test/jiawu-war",
+                "snippet": "甲午中日战争发生于1894年至1895年，影响中国近代化进程。",
+            }
+        ]
+
+    def search(self, *, query, max_results=None):
+        self.searches.append({"query": query, "max_results": max_results})
+        return self.results[: max_results or len(self.results)]
 
 
 class FakeChatModel:
@@ -77,6 +94,18 @@ def _tool_call(
     }
 
 
+def _web_search_tool_call(call_id="call_web_search", *, query="甲午中日战争 核心知识点", max_results=3):
+    return {
+        "index": 0,
+        "id": call_id,
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "arguments": json.dumps({"query": query, "max_results": max_results}, ensure_ascii=False),
+        },
+    }
+
+
 class ToolCallingChatModel(FakeChatModel):
     def stream_chat(self, messages, **kwargs):
         self.stream_calls.append({"messages": messages, "kwargs": kwargs})
@@ -98,6 +127,57 @@ class PureToolThenAnswerChatModel(FakeChatModel):
         assert tool_messages
         assert "suggestion_id" in tool_messages[-1]["content"]
         yield StreamEvent(kind="text_delta", text="我已经帮你把费曼学习法整理成笔记建议了。")
+
+
+class SearchThenNoteChatModel(FakeChatModel):
+    def stream_chat(self, messages, **kwargs):
+        self.stream_calls.append({"messages": messages, "kwargs": kwargs})
+        if len(self.stream_calls) == 1:
+            tool_names = [tool["function"]["name"] for tool in kwargs["tools"]]
+            assert tool_names == ["web_search", "propose_note"]
+            yield StreamEvent(kind="tool_call", data=_web_search_tool_call())
+            return
+        if len(self.stream_calls) == 2:
+            tool_messages = [message for message in messages if message.get("role") == "tool"]
+            assert tool_messages
+            assert "甲午中日战争" in tool_messages[-1]["content"]
+            yield StreamEvent(kind="text_delta", text="已根据网络资料整理成同类型拓展笔记。")
+            yield StreamEvent(
+                kind="tool_call",
+                data=_tool_call(
+                    "call_propose_jiawu",
+                    title="甲午中日战争核心知识点",
+                    content=(
+                        "## 背景\n"
+                        "甲午中日战争发生于1894年至1895年，是中国近代史的重要转折点。\n\n"
+                        "## 影响\n"
+                        "- 清政府战败并签订《马关条约》\n"
+                        "- 刺激民族危机意识和近代化改革"
+                    ),
+                    category="历史",
+                    tags=["甲午战争", "中国近代史"],
+                ),
+            )
+            return
+        yield StreamEvent(kind="text_delta", text="笔记建议已创建。")
+
+
+class ConfirmedOfferToolChatModel(FakeChatModel):
+    def stream_chat(self, messages, **kwargs):
+        self.stream_calls.append({"messages": messages, "kwargs": kwargs})
+        assert kwargs["tools"][0]["function"]["name"] == "propose_note"
+        context = "\n".join(str(message.get("content") or "") for message in messages)
+        assert "讲讲费曼学习法" in context
+        assert "需要我为你生成一份笔记吗？" in context
+        yield StreamEvent(
+            kind="tool_call",
+            data=_tool_call(
+                "call_offer_note",
+                title="费曼学习法",
+                content="费曼学习法是一种主动学习方法：先选择主题，再用自己的话讲清楚，最后发现漏洞并简化表达。",
+                tags=["学习法"],
+            ),
+        )
 
 
 class MultiToolChatModel(FakeChatModel):
@@ -230,6 +310,7 @@ def test_intent_classifier_distinguishes_chat_question_and_note_suggestion():
     assert classify_chat_intent("帮我记录：链式法则用于复合函数求导") == "out_of_scope_note_worthy"
     assert classify_chat_intent("我要的是你去帮我沉淀到笔记中") == "out_of_scope_note_worthy"
     assert classify_chat_intent("帮我做一篇有关电磁场对比的笔记，使用tool_calling，帮我沉淀到我的知识库中") == "out_of_scope_note_worthy"
+    assert classify_chat_intent("你自己去网络上帮我搜索，我需要的是相同类型的拓展笔记") == "out_of_scope_note_worthy"
     long_question = "请详细解释费曼学习法的原理和应用场景以及局限性" * 4
     assert len(long_question) >= 80
     assert classify_chat_intent(long_question) == "note_question"
@@ -251,6 +332,26 @@ def test_note_tool_policy_only_enables_explicit_note_add_requests():
     assert should_enable_note_suggestion_tool(intent="note_question", references=refs) is False
     assert should_enable_note_suggestion_tool(intent="out_of_scope_note_worthy", references=refs) is True
     assert should_enable_note_suggestion_tool(intent="chat", references=[]) is False
+
+
+@pytest.mark.unit
+def test_web_search_tool_policy_only_enables_explicit_external_search_requests():
+    assert should_enable_web_search_tool(message="你自己去网络上帮我搜索甲午中日战争", intent="note_question") is True
+    assert should_enable_web_search_tool(message="查一下最新人工智能新闻", intent="chat") is True
+    assert should_enable_web_search_tool(message="根据我的笔记总结一下极限怎么求？", intent="note_question") is False
+    assert should_enable_web_search_tool(message="搜索我的笔记里关于极限的内容", intent="note_question") is False
+
+
+@pytest.mark.unit
+def test_note_offer_policy_prompts_uncertain_note_worthy_questions_only():
+    from app.services.chat_service import is_note_offer_confirmation, should_offer_note_generation
+
+    assert should_offer_note_generation(message="讲讲费曼学习法", intent="note_question", note_tool_enabled=False) is True
+    assert should_offer_note_generation(message="可以讲讲量子力学吗", intent="note_question", note_tool_enabled=False) is True
+    assert should_offer_note_generation(message="你好", intent="chat", note_tool_enabled=False) is False
+    assert should_offer_note_generation(message="帮我记录：链式法则", intent="out_of_scope_note_worthy", note_tool_enabled=True) is False
+    assert is_note_offer_confirmation("需要，帮我生成") is True
+    assert is_note_offer_confirmation("不用了") is False
 
 
 @pytest.mark.unit
@@ -656,6 +757,54 @@ def test_referenced_notes_can_skip_vector_query(db_session, test_user):
 
 
 @pytest.mark.unit
+def test_explicit_references_are_authoritative_even_when_vector_requested(db_session, test_user):
+    fake_vector = FakeVectorClient()
+    selected = _make_note(
+        test_user.id,
+        title="TripleByte 程序员求职服务户外广告",
+        original_text="TripleByte 帮助程序员匹配求职机会。",
+        structured_data={
+            "summary": "TripleByte 求职广告",
+            "sections": [{"heading": "主题", "content": "这篇笔记记录 TripleByte 的程序员求职服务广告。"}],
+        },
+    )
+    unrelated = _make_note(
+        test_user.id,
+        title="大模型应用流式输出渲染原理",
+        original_text="无关的大模型流式输出渲染内容。",
+        structured_data={
+            "summary": "流式输出",
+            "sections": [{"heading": "原理", "content": "大模型应用可以通过 SSE 进行流式输出渲染。"}],
+        },
+    )
+    db_session.add_all([selected, unrelated])
+    db_session.commit()
+    fake_vector.query_hits = [
+        NexoraDBHit(
+            vector_id="unrelated-section-1",
+            text="大模型应用可以通过 SSE 进行流式输出渲染。",
+            metadata={"note_id": unrelated.id, "chunk_id": "section-1"},
+            score=0.99,
+        )
+    ]
+
+    service = ChatService(db_session, vector_client=fake_vector, model_service=FakeChatModel())
+    refs = service.retrieve_references(
+        user_id=test_user.id,
+        message="讲解一下这篇笔记",
+        referenced_note_ids=[selected.id],
+        query_vector=True,
+    )
+    combined_context = "\n".join(f"{ref['title']}\n{ref['text']}" for ref in refs)
+
+    assert fake_vector.queries == []
+    assert {ref["note_id"] for ref in refs} == {selected.id}
+    assert "TripleByte 程序员求职服务户外广告" in combined_context
+    assert "大模型应用流式输出渲染原理" not in combined_context
+    assert "流式输出渲染" not in combined_context
+
+
+@pytest.mark.unit
 def test_explicit_references_include_all_chunks_and_short_chat_context(db_session, test_user):
     fake_vector = FakeVectorClient()
     note = _make_note(test_user.id)
@@ -690,6 +839,47 @@ def test_explicit_references_include_all_chunks_and_short_chat_context(db_sessio
     assert note.title in combined_context
     assert "定义" in combined_context
     assert "计算" in combined_context
+
+
+@pytest.mark.unit
+def test_latest_note_offer_skips_newer_non_offer_assistant_messages(db_session, test_user):
+    service = ChatService(db_session, vector_client=FakeVectorClient(), model_service=FakeChatModel())
+    conversation = service.get_or_create_conversation(
+        user_id=test_user.id,
+        conversation_id=None,
+        first_message="讲讲费曼学习法",
+    )
+    service.add_message(
+        user_id=test_user.id,
+        conversation_id=conversation.id,
+        role="user",
+        content="讲讲费曼学习法",
+    )
+    pending = service.add_message(
+        user_id=test_user.id,
+        conversation_id=conversation.id,
+        role="assistant",
+        content="费曼学习法说明。\n\n需要我为你生成一份笔记吗？",
+        metadata={"note_offer_pending": True, "note_offer_source_message": "讲讲费曼学习法"},
+    )
+    service.add_message(
+        user_id=test_user.id,
+        conversation_id=conversation.id,
+        role="user",
+        content="先不用，再讲讲别的",
+    )
+    service.add_message(
+        user_id=test_user.id,
+        conversation_id=conversation.id,
+        role="assistant",
+        content="西蒙学习法说明。",
+        metadata={"intent": "chat"},
+    )
+
+    offer = service.get_latest_note_offer(user_id=test_user.id, conversation_id=conversation.id)
+
+    assert offer["assistant_message_id"] == pending.id
+    assert offer["source_user_message"] == "讲讲费曼学习法"
 
 
 @pytest.mark.unit
@@ -1065,6 +1255,111 @@ def test_chat_stream_explicit_note_add_keeps_tool_calling_with_references(test_c
 
 
 @pytest.mark.integration
+def test_chat_stream_web_search_expansion_note_can_create_suggestion(test_client, monkeypatch):
+    from app.services import chat_service as chat_service_module
+
+    fake_model = SearchThenNoteChatModel()
+    fake_search = FakeWebSearchClient()
+    monkeypatch.setattr(chat_service_module, "nexoradb_client", FakeVectorClient())
+    monkeypatch.setattr(chat_service_module, "doubao_chat_service", fake_model)
+    monkeypatch.setattr(chat_service_module, "web_search_service", fake_search)
+
+    _, token = _register_and_login(test_client)
+    with test_client.stream(
+        "POST",
+        "/api/v1/chat/stream",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"message": "你自己去网络上帮我搜索，我需要的是相同类型的拓展笔记"},
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    retrieval = _extract_sse_payloads(body, "retrieval")[0]
+    tool_call_events = _extract_sse_payloads(body, "tool_call")
+    tool_result_events = _extract_sse_payloads(body, "tool_result")
+    suggestion_events = _extract_sse_payloads(body, "note_suggestion")
+    done_events = _extract_sse_payloads(body, "done")
+
+    assert retrieval["intent"] == "out_of_scope_note_worthy"
+    assert [item["name"] for item in tool_call_events] == ["web_search", "propose_note"]
+    assert tool_result_events[0]["name"] == "web_search"
+    assert tool_result_events[0]["status"] == "ok"
+    assert tool_result_events[0]["result_count"] == 1
+    assert tool_result_events[1]["name"] == "propose_note"
+    assert tool_result_events[1]["status"] == "ok"
+    assert fake_search.searches == [{"query": "甲午中日战争 核心知识点", "max_results": 3}]
+    assert len(fake_model.stream_calls) == 3
+    assert suggestion_events[0]["title"] == "甲午中日战争核心知识点"
+    assert suggestion_events[0]["category"] == "历史"
+    assert suggestion_events[0]["tags"] == ["甲午战争", "中国近代史"]
+    assert done_events[0]["suggestion_id"] == suggestion_events[0]["id"]
+
+
+@pytest.mark.integration
+def test_chat_stream_uncertain_summary_prompts_for_note_followup(test_client, monkeypatch):
+    from app.services import chat_service as chat_service_module
+
+    fake_model = FakeChatModel()
+    monkeypatch.setattr(chat_service_module, "nexoradb_client", FakeVectorClient())
+    monkeypatch.setattr(chat_service_module, "doubao_chat_service", fake_model)
+
+    _, token = _register_and_login(test_client)
+    headers = {"Authorization": f"Bearer {token}"}
+    with test_client.stream(
+        "POST",
+        "/api/v1/chat/stream",
+        headers=headers,
+        json={"message": "讲讲费曼学习法"},
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    delta_text = "".join(item["delta"] for item in _extract_sse_payloads(body, "delta"))
+    done_events = _extract_sse_payloads(body, "done")
+    assert "需要我为你生成一份笔记吗？" in delta_text
+    assert "tools" not in fake_model.stream_calls[0]["kwargs"]
+    assert _extract_sse_payloads(body, "tool_call") == []
+    assert done_events[0]["suggestion_id"] is None
+
+
+@pytest.mark.integration
+def test_chat_stream_note_followup_confirmation_triggers_tool_call(test_client, monkeypatch):
+    from app.services import chat_service as chat_service_module
+
+    first_model = FakeChatModel()
+    monkeypatch.setattr(chat_service_module, "nexoradb_client", FakeVectorClient())
+    monkeypatch.setattr(chat_service_module, "doubao_chat_service", first_model)
+
+    _, token = _register_and_login(test_client)
+    headers = {"Authorization": f"Bearer {token}"}
+    first_resp = test_client.post(
+        "/api/v1/chat/stream",
+        headers=headers,
+        json={"message": "讲讲费曼学习法"},
+    )
+    assert first_resp.status_code == 200
+    first_body = first_resp.text
+    assert "需要我为你生成一份笔记吗？" in first_body
+    conversation_id = _extract_sse_payloads(first_body, "conversation_id")[0]["conversation_id"]
+
+    confirm_model = ConfirmedOfferToolChatModel()
+    monkeypatch.setattr(chat_service_module, "doubao_chat_service", confirm_model)
+    with test_client.stream(
+        "POST",
+        "/api/v1/chat/stream",
+        headers=headers,
+        json={"conversation_id": conversation_id, "message": "需要，帮我生成"},
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    suggestion_events = _extract_sse_payloads(body, "note_suggestion")
+    assert _extract_sse_payloads(body, "tool_call")[0]["name"] == "propose_note"
+    assert suggestion_events[0]["title"] == "费曼学习法"
+    assert suggestion_events[0]["tags"] == ["学习法"]
+
+
+@pytest.mark.integration
 def test_chat_stream_reference_question_does_not_enable_note_tool(test_client, monkeypatch):
     from app.services import chat_service as chat_service_module
     from app.services import note_index_service
@@ -1095,6 +1390,32 @@ def test_chat_stream_reference_question_does_not_enable_note_tool(test_client, m
             device_id=user_id,
         )
         note_id = note.id
+        unrelated = NoteService(session).create_note(
+            {
+                "title": "大模型应用流式输出渲染原理",
+                "category": "技术",
+                "tags": [],
+                "image_urls": [],
+                "image_filenames": [],
+                "image_sizes": [],
+                "original_text": "无关的大模型流式输出渲染内容。",
+                "structured_data": {
+                    "summary": "流式输出",
+                    "sections": [{"heading": "原理", "content": "大模型应用可以通过 SSE 进行流式输出渲染。"}],
+                },
+            },
+            user_id,
+            device_id=user_id,
+        )
+        unrelated_id = unrelated.id
+    fake_vector.query_hits = [
+        NexoraDBHit(
+            vector_id="unrelated-section-1",
+            text="大模型应用可以通过 SSE 进行流式输出渲染。",
+            metadata={"note_id": unrelated_id, "chunk_id": "section-1"},
+            score=0.99,
+        )
+    ]
 
     with test_client.stream(
         "POST",
@@ -1106,7 +1427,16 @@ def test_chat_stream_reference_question_does_not_enable_note_tool(test_client, m
         body = "".join(response.iter_text())
 
     retrieval = _extract_sse_payloads(body, "retrieval")[0]
+    model_context = "\n".join(message["content"] for message in fake_model.stream_calls[0]["messages"])
     assert retrieval["intent"] == "note_question"
+    assert retrieval["requested_note_ids"] == [note_id]
+    assert retrieval["effective_note_ids"] == [note_id]
+    assert fake_vector.queries == []
+    assert note_id in model_context
+    assert unrelated_id not in model_context
+    assert "极限用于描述趋近过程" in model_context
+    assert "大模型应用流式输出渲染原理" not in model_context
+    assert "流式输出渲染" not in model_context
     assert "tools" not in fake_model.stream_calls[0]["kwargs"]
     assert _extract_sse_payloads(body, "tool_call") == []
     assert _extract_sse_payloads(body, "note_suggestion") == []

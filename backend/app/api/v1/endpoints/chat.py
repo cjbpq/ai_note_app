@@ -32,7 +32,10 @@ from app.services.chat_service import (
     ChatService,
     ToolCallLoopGuard,
     classify_chat_intent,
+    is_note_offer_confirmation,
     should_enable_note_suggestion_tool,
+    should_offer_note_generation,
+    should_enable_web_search_tool,
 )
 from app.services.doubao_service import DoubaoServiceError
 from app.services.note_index_service import NoteIndexService
@@ -118,22 +121,36 @@ async def stream_chat(
             yield _sse("conversation_id", {"conversation_id": conversation.id})
 
             requested_note_ids = [str(item) for item in body.referenced_note_ids]
+            pending_note_offer = service.get_latest_note_offer(
+                user_id=current_user.id,
+                conversation_id=conversation.id,
+            )
+            offer_confirmed = bool(pending_note_offer and is_note_offer_confirmation(body.message))
             service.add_message(
                 user_id=current_user.id,
                 conversation_id=conversation.id,
                 role="user",
                 content=body.message,
-                metadata={"referenced_note_ids": requested_note_ids},
+                metadata={
+                    "referenced_note_ids": requested_note_ids,
+                    "note_offer_confirmed": offer_confirmed,
+                    "note_offer_assistant_message_id": pending_note_offer.get("assistant_message_id")
+                    if offer_confirmed and pending_note_offer
+                    else None,
+                },
             )
-            intent = classify_chat_intent(body.message)
+            intent = "out_of_scope_note_worthy" if offer_confirmed else classify_chat_intent(body.message)
             references = []
             if requested_note_ids or intent == "note_question":
+                # Explicit note references are the user's selected scope; do not
+                # expand them with library-wide vector hits.
+                query_vector = intent == "note_question" and not requested_note_ids
                 references = service.retrieve_references(
                     user_id=current_user.id,
                     message=body.message,
                     referenced_note_ids=requested_note_ids,
                     top_k=body.rag_top_k,
-                    query_vector=intent == "note_question",
+                    query_vector=query_vector,
                 )
 
             public_refs = [{key: ref.get(key) for key in ("note_id", "title", "chunk_id", "section_heading", "snippet", "score")} for ref in references]
@@ -158,21 +175,31 @@ async def stream_chat(
                 references=references,
                 message_length=len(body.message),
             )
+            note_offer_should_prompt = should_offer_note_generation(
+                message=body.message,
+                intent=intent,
+                note_tool_enabled=note_tool_enabled,
+            )
+            web_search_enabled = should_enable_web_search_tool(message=body.message, intent=intent)
             model_messages = service.build_model_messages(
                 user_id=current_user.id,
                 conversation_id=conversation.id,
                 intent=intent,
                 references=references,
                 note_tool_enabled=note_tool_enabled,
+                web_search_enabled=web_search_enabled,
             )
-            note_tools = service.build_note_suggestion_tools() if note_tool_enabled else None
+            chat_tools = service.build_chat_tools(
+                note_suggestion_enabled=note_tool_enabled,
+                web_search_enabled=web_search_enabled,
+            )
             usage_payload = None
             all_tool_calls = []
             loop_guard = ToolCallLoopGuard()
 
             def stream_worker(messages_for_model, event_queue: queue.Queue[tuple[str, object]]) -> None:
                 try:
-                    stream_kwargs = {"tools": note_tools} if note_tools else {}
+                    stream_kwargs = {"tools": chat_tools} if chat_tools else {}
                     stream_kwargs["thinking_enabled"] = bool(current_user.chat_thinking_enabled)
                     for delta_item in service.model_service.stream_chat(messages_for_model, **stream_kwargs):
                         event_queue.put(("delta", delta_item))
@@ -224,6 +251,7 @@ async def stream_chat(
                                 intent=intent,
                                 references=references,
                                 note_tool_enabled=note_tool_enabled,
+                                web_search_enabled=web_search_enabled,
                                 force_compact=True,
                                 force_reference_summary=True,
                             )
@@ -233,10 +261,12 @@ async def stream_chat(
 
                     kind, text, data = _stream_event_parts(payload)
                     if kind == "tool_call":
-                        if not note_tool_enabled:
-                            continue
                         tool_call = data or {}
-                        if isinstance(tool_call, dict):
+                        if isinstance(tool_call, dict) and service.is_tool_call_enabled(
+                            tool_call,
+                            note_tool_enabled=note_tool_enabled,
+                            web_search_enabled=web_search_enabled,
+                        ):
                             round_tool_calls.append(tool_call)
                             yield _sse("tool_call", _tool_call_sse_payload(service, tool_call))
                         continue
@@ -279,11 +309,15 @@ async def stream_chat(
                     }
                 )
                 for tool_call in round_tool_calls:
-                    result = service.execute_note_suggestion_tool(
+                    result = service.execute_tool_call(
                         user_id=current_user.id,
                         conversation_id=conversation.id,
                         tool_call=tool_call,
-                        source_message=body.message,
+                        source_message=(
+                            f"{pending_note_offer.get('source_user_message')}\n\n{pending_note_offer.get('assistant_content')}"
+                            if offer_confirmed and pending_note_offer
+                            else body.message
+                        ),
                     )
                     result_payload = result.as_dict()
                     yield _sse(
@@ -313,6 +347,15 @@ async def stream_chat(
                 assistant_metadata["tool_calls"] = all_tool_calls
             if not assistant_text.strip():
                 assistant_text = ASSISTANT_TEXT_FALLBACK
+            if note_offer_should_prompt and not all_tool_calls:
+                offer_text = "需要我为你生成一份笔记吗？"
+                if offer_text not in assistant_text:
+                    if not assistant_text.endswith(("\n", "\n\n")):
+                        assistant_text += "\n\n"
+                    assistant_text += offer_text
+                    yield _sse("delta", {"delta": f"\n\n{offer_text}"})
+                assistant_metadata["note_offer_pending"] = True
+                assistant_metadata["note_offer_source_message"] = body.message
             assistant_message = service.add_message(
                 user_id=current_user.id,
                 conversation_id=conversation.id,
