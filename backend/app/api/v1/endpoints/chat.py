@@ -32,6 +32,7 @@ from app.services.chat_service import (
     ChatService,
     ToolCallLoopGuard,
     classify_chat_intent,
+    is_note_creation_followup,
     is_note_offer_confirmation,
     should_enable_note_suggestion_tool,
     should_offer_note_generation,
@@ -125,7 +126,17 @@ async def stream_chat(
                 user_id=current_user.id,
                 conversation_id=conversation.id,
             )
-            offer_confirmed = bool(pending_note_offer and is_note_offer_confirmation(body.message))
+            has_note_creation_context = bool(
+                pending_note_offer
+                or service.has_recent_note_creation_context(
+                    user_id=current_user.id,
+                    conversation_id=conversation.id,
+                )
+            )
+            offer_confirmed = bool(
+                (pending_note_offer and is_note_offer_confirmation(body.message))
+                or (has_note_creation_context and is_note_creation_followup(body.message))
+            )
             service.add_message(
                 user_id=current_user.id,
                 conversation_id=conversation.id,
@@ -193,13 +204,21 @@ async def stream_chat(
                 note_suggestion_enabled=note_tool_enabled,
                 web_search_enabled=web_search_enabled,
             )
+            force_note_tool_choice = bool(note_tool_enabled and not web_search_enabled)
+            allow_structured_text_fallback = bool(offer_confirmed)
             usage_payload = None
             all_tool_calls = []
+            fallback_suggestion = None
             loop_guard = ToolCallLoopGuard()
 
             def stream_worker(messages_for_model, event_queue: queue.Queue[tuple[str, object]]) -> None:
                 try:
                     stream_kwargs = {"tools": chat_tools} if chat_tools else {}
+                    if force_note_tool_choice and not all_tool_calls:
+                        stream_kwargs["tool_choice"] = {
+                            "type": "function",
+                            "function": {"name": "propose_note"},
+                        }
                     stream_kwargs["thinking_enabled"] = bool(current_user.chat_thinking_enabled)
                     for delta_item in service.model_service.stream_chat(messages_for_model, **stream_kwargs):
                         event_queue.put(("delta", delta_item))
@@ -214,6 +233,7 @@ async def stream_chat(
             for round_num in range(1, loop_guard.max_rounds + 1):
                 round_text = ""
                 round_tool_calls = []
+                round_text_buffer = []
                 model_events: queue.Queue[tuple[str, object]] = queue.Queue()
                 worker_thread = threading.Thread(
                     target=stream_worker,
@@ -281,14 +301,40 @@ async def stream_chat(
                         continue
                     if kind == "text_delta" and text:
                         round_text += text
-                        assistant_text += text
-                        yield _sse("delta", {"delta": text})
+                        if force_note_tool_choice and not all_tool_calls and not round_tool_calls:
+                            round_text_buffer.append(text)
+                        else:
+                            assistant_text += text
+                            yield _sse("delta", {"delta": text})
                 if retry_after_context_error:
                     worker_thread.join(timeout=1.0)
                     continue
 
                 worker_thread.join(timeout=1.0)
                 if not round_tool_calls:
+                    if round_text_buffer and allow_structured_text_fallback:
+                        buffered_text = "".join(round_text_buffer)
+                        fallback_suggestion = service.create_note_suggestion(
+                            user_id=current_user.id,
+                            conversation_id=conversation.id,
+                            message_id=None,
+                            source_message=(
+                                f"{pending_note_offer.get('source_user_message')}\n\n{pending_note_offer.get('assistant_content')}"
+                                if offer_confirmed and pending_note_offer
+                                else body.message
+                            ),
+                            content=buffered_text,
+                            metadata={
+                                "source": "propose_note_text_fallback",
+                                "reason": "model_returned_structured_note_without_tool_call",
+                            },
+                        )
+                        assistant_text += "已为你生成一条笔记建议，请在下方确认保存。"
+                        yield _sse("delta", {"delta": "已为你生成一条笔记建议，请在下方确认保存。"})
+                    elif round_text_buffer:
+                        buffered_text = "".join(round_text_buffer)
+                        assistant_text += buffered_text
+                        yield _sse("delta", {"delta": buffered_text})
                     break
 
                 all_tool_calls.extend(round_tool_calls)
@@ -370,6 +416,8 @@ async def stream_chat(
                 conversation_id=conversation.id,
                 tool_call_ids=[tool_call.get("id") for tool_call in all_tool_calls],
             )
+            if fallback_suggestion is not None:
+                suggestions_for_this_turn.append(fallback_suggestion)
             for suggestion in suggestions_for_this_turn:
                 suggestion.message_id = assistant_message.id
                 service.db.add(suggestion)
