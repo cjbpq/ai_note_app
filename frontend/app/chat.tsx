@@ -1,4 +1,5 @@
 import { Href, useLocalSearchParams, useRouter } from "expo-router";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
@@ -34,6 +35,7 @@ import { ChatNoteSuggestionCard } from "../components/chat/chat-note-suggestion-
 import { ChatReferenceChipBar } from "../components/chat/chat-reference-chip-bar";
 import { ChatReferencePickerSheet } from "../components/chat/chat-reference-picker-sheet";
 import { ChatSessionDrawer } from "../components/chat/chat-session-drawer";
+import { ChatSuggestionCategoryDialog } from "../components/chat/chat-suggestion-category-dialog";
 import { useChat } from "../hooks/useChat";
 import { useChatConversations } from "../hooks/useChatConversations";
 import { useCategories } from "../hooks/useCategories";
@@ -117,8 +119,15 @@ const getReferencedNoteIds = (
 };
 
 const getMessageSuggestions = (
+  suggestions: ChatNoteSuggestion[] | undefined,
   metadata: Record<string, unknown> | undefined,
 ): ChatNoteSuggestion[] => {
+  if (Array.isArray(suggestions) && suggestions.length > 0) {
+    return suggestions.filter(
+      (suggestion): suggestion is ChatNoteSuggestion =>
+        isRecord(suggestion) && typeof suggestion.id === "string",
+    );
+  }
   const rawSuggestions = metadata?.suggestions;
   if (!Array.isArray(rawSuggestions)) return [];
   return rawSuggestions.filter(
@@ -147,7 +156,11 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const { showWarning, showSuccess, showError } = useToast();
   const { notes, isLoading: isNotesLoading } = useNotes();
-  const { categories } = useCategories();
+  const {
+    categories,
+    isLoading: isCategoriesLoading,
+    addLocalCategory,
+  } = useCategories();
   const { noteId, noteTitle } = useLocalSearchParams<{
     noteId?: string;
     noteTitle?: string;
@@ -172,6 +185,8 @@ export default function ChatScreen() {
   const [dismissingSuggestionId, setDismissingSuggestionId] = useState<
     string | null
   >(null);
+  const [pendingSuggestionToSave, setPendingSuggestionToSave] =
+    useState<ChatNoteSuggestion | null>(null);
 
   const referenceNoteId = useMemo(() => {
     return Array.isArray(noteId) ? noteId[0] : noteId;
@@ -530,13 +545,42 @@ export default function ChatScreen() {
   }, []);
 
   const handleAcceptSuggestion = useCallback(
-    async (suggestion: ChatNoteSuggestion) => {
+    (suggestion: ChatNoteSuggestion) => {
       if (savingSuggestionId || dismissingSuggestionId) return;
+      setPendingSuggestionToSave(suggestion);
+    },
+    [dismissingSuggestionId, savingSuggestionId],
+  );
+
+  const handleDismissSuggestionCategoryDialog = useCallback(() => {
+    if (savingSuggestionId) return;
+    setPendingSuggestionToSave(null);
+  }, [savingSuggestionId]);
+
+  const handleConfirmSuggestionCategory = useCallback(
+    async (category: string) => {
+      const suggestion = pendingSuggestionToSave;
+      const normalizedCategory = category.trim();
+      if (
+        !suggestion ||
+        !normalizedCategory ||
+        savingSuggestionId ||
+        dismissingSuggestionId
+      ) {
+        return;
+      }
 
       setSavingSuggestionId(suggestion.id);
       try {
-        const result = await chatService.acceptSuggestion(suggestion.id);
+        if (!categories.some((item) => item.name === normalizedCategory)) {
+          await addLocalCategory(normalizedCategory);
+        }
+
+        const result = await chatService.acceptSuggestion(suggestion.id, {
+          category: normalizedCategory,
+        });
         updateSuggestion(result.suggestion);
+        setPendingSuggestionToSave(null);
 
         const note = await noteService.getNoteById(result.note_id);
         await noteService.syncNoteToLocal(note);
@@ -556,7 +600,10 @@ export default function ChatScreen() {
       }
     },
     [
+      addLocalCategory,
+      categories,
       dismissingSuggestionId,
+      pendingSuggestionToSave,
       queryClient,
       savingSuggestionId,
       showError,
@@ -623,7 +670,10 @@ export default function ChatScreen() {
       const isEmptyStreaming =
         item.role === "assistant" && item.isStreaming && !item.content;
       const messageReferences = getMessageReferences(item.metadata);
-      const messageSuggestions = getMessageSuggestions(item.metadata);
+      const messageSuggestions = getMessageSuggestions(
+        item.suggestions,
+        item.metadata,
+      );
       const contentColor = isError
         ? theme.colors.onErrorContainer
         : isUser
@@ -790,6 +840,22 @@ export default function ChatScreen() {
                   ? t("chat.empty_with_reference")
                   : t("chat.empty_subtitle")}
               </Text>
+              <View style={styles.emptySuggestionHint}>
+                <MaterialCommunityIcons
+                  name="lightbulb-on-outline"
+                  size={16}
+                  color={theme.colors.onSurfaceVariant}
+                />
+                <Text
+                  variant="labelMedium"
+                  style={[
+                    styles.emptySuggestionHintText,
+                    { color: theme.colors.onSurfaceVariant },
+                  ]}
+                >
+                  {t("chat.suggestion_hint")}
+                </Text>
+              </View>
             </View>
           }
           keyboardShouldPersistTaps="handled"
@@ -919,6 +985,18 @@ export default function ChatScreen() {
         onSelect={handleSelectReference}
         onDismiss={() => setIsReferencePickerVisible(false)}
       />
+      <ChatSuggestionCategoryDialog
+        visible={!!pendingSuggestionToSave}
+        categories={categories}
+        recommendedCategory={pendingSuggestionToSave?.category}
+        isLoading={isCategoriesLoading}
+        isSaving={
+          !!pendingSuggestionToSave &&
+          savingSuggestionId === pendingSuggestionToSave.id
+        }
+        onDismiss={handleDismissSuggestionCategoryDialog}
+        onConfirm={handleConfirmSuggestionCategory}
+      />
       <ChatSessionDrawer
         visible={isSessionDrawerVisible}
         conversations={conversations}
@@ -958,6 +1036,19 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: "center",
     lineHeight: 20,
+  },
+  emptySuggestionHint: {
+    marginTop: 14,
+    maxWidth: 300,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "center",
+    gap: 6,
+  },
+  emptySuggestionHintText: {
+    flexShrink: 1,
+    textAlign: "center",
+    lineHeight: 18,
   },
   messageRow: {
     marginBottom: 12,

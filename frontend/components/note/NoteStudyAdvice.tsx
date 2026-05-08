@@ -3,10 +3,13 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import { StyleSheet, View } from "react-native";
 import { Surface, Text, useTheme } from "react-native-paper";
-import { MathAwareText } from "../common/MathAwareText";
+import {
+  getStructuredRichTextContent,
+  StructuredRichText,
+} from "../common/StructuredRichText";
 
 interface NoteStudyAdviceProps {
-  studyAdvice?: string;
+  studyAdvice?: unknown;
 }
 
 export const NoteStudyAdvice: React.FC<NoteStudyAdviceProps> = ({
@@ -28,7 +31,9 @@ export const NoteStudyAdvice: React.FC<NoteStudyAdviceProps> = ({
         text: theme.colors.onSurface,
       };
 
-  if (!studyAdvice) return null;
+  const renderableAdvice = getStructuredRichTextContent(studyAdvice);
+
+  if (!renderableAdvice.trim()) return null;
 
   return (
     <Surface
@@ -63,8 +68,8 @@ export const NoteStudyAdvice: React.FC<NoteStudyAdviceProps> = ({
       </View>
 
       <View style={styles.content}>
-        <MathAwareText
-          content={studyAdvice}
+        <StructuredRichText
+          content={renderableAdvice}
           variant="bodyMedium"
           textStyle={{
             color: adviceColors.text,

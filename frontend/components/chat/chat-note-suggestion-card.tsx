@@ -12,6 +12,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { ChatNoteSuggestion } from "../../types";
+import { StructuredRichText } from "../common/StructuredRichText";
 
 interface ChatNoteSuggestionCardProps {
   suggestion: ChatNoteSuggestion;
@@ -93,18 +94,28 @@ export const ChatNoteSuggestionCard = ({
           />
         </View>
         <View style={styles.headerText}>
-          <Text variant="labelLarge" style={{ color: theme.colors.onSurface }}>
+          <Text
+            variant="titleSmall"
+            numberOfLines={1}
+            style={[styles.statusText, { color: theme.colors.onSurface }]}
+          >
             {isAccepted
               ? t("chat.suggestion_saved")
               : t("chat.suggestion_title")}
           </Text>
-          <Text
-            variant="bodySmall"
-            style={{ color: theme.colors.onSurfaceVariant }}
-            numberOfLines={1}
+          <Chip
+            compact
+            style={[
+              styles.categoryChip,
+              { backgroundColor: theme.colors.surfaceVariant },
+            ]}
+            textStyle={[
+              styles.categoryChipText,
+              { color: theme.colors.onSurfaceVariant },
+            ]}
           >
             {suggestion.category || t("chat.suggestion_default_category")}
-          </Text>
+          </Chip>
         </View>
       </View>
 
@@ -120,13 +131,16 @@ export const ChatNoteSuggestionCard = ({
         style={styles.contentToggle}
       >
         <View>
-          <Text
+          <StructuredRichText
+            content={suggestion.content}
             variant="bodySmall"
             numberOfLines={isExpanded ? undefined : 5}
-            style={[styles.content, { color: theme.colors.onSurfaceVariant }]}
-          >
-            {suggestion.content}
-          </Text>
+            allowBlockMarkdown={false}
+            textStyle={[
+              styles.content,
+              { color: theme.colors.onSurfaceVariant },
+            ]}
+          />
           <Text
             variant="labelSmall"
             style={[styles.expandText, { color: theme.colors.primary }]}
@@ -141,7 +155,18 @@ export const ChatNoteSuggestionCard = ({
       {suggestion.tags.length > 0 ? (
         <View style={styles.tags}>
           {suggestion.tags.slice(0, 4).map((tag) => (
-            <Chip key={tag} compact style={styles.tag}>
+            <Chip
+              key={tag}
+              compact
+              style={[
+                styles.tag,
+                { backgroundColor: theme.colors.surfaceVariant },
+              ]}
+              textStyle={[
+                styles.tagText,
+                { color: theme.colors.onSurfaceVariant },
+              ]}
+            >
               {tag}
             </Chip>
           ))}
@@ -216,9 +241,28 @@ const styles = StyleSheet.create({
   },
   headerText: {
     flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  statusText: {
+    flexShrink: 1,
+    fontWeight: "700",
+  },
+  categoryChip: {
+    height: 28,
+    flexShrink: 0,
+    maxWidth: 112,
+  },
+  categoryChipText: {
+    marginHorizontal: 8,
+    fontSize: 12,
+    lineHeight: 16,
   },
   noteTitle: {
     lineHeight: 20,
+    fontWeight: "700",
   },
   contentToggle: {
     borderRadius: 8,
@@ -236,6 +280,12 @@ const styles = StyleSheet.create({
   },
   tag: {
     height: 28,
+    maxWidth: "48%",
+  },
+  tagText: {
+    marginHorizontal: 8,
+    fontSize: 12,
+    lineHeight: 16,
   },
   actions: {
     minHeight: 36,

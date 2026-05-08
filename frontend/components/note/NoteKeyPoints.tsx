@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { StyleSheet, View } from "react-native";
 import { Surface, Text, useTheme } from "react-native-paper";
 import { toSafeStringArray } from "../../utils/safeData";
-import { MathAwareText } from "../common/MathAwareText";
+import { StructuredRichText } from "../common/StructuredRichText";
 
 interface NoteKeyPointsProps {
   keyPoints?: string[];
@@ -35,7 +35,7 @@ export const NoteKeyPoints: React.FC<NoteKeyPointsProps> = ({ keyPoints }) => {
               ]}
             />
             <View style={styles.pointTextContainer}>
-              <MathAwareText
+              <StructuredRichText
                 content={point}
                 variant="bodyMedium"
                 textStyle={[styles.pointText, { color: theme.colors.onSurface }]}

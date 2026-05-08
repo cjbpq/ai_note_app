@@ -48,6 +48,25 @@ import { useUploadTaskStore } from "../../store/useUploadTaskStore";
 import { ServiceError } from "../../types";
 import { toSafeStringArray } from "../../utils/safeData";
 
+const getStructuredField = (
+  structuredData: unknown,
+  camelKey: string,
+  snakeKey?: string,
+): unknown => {
+  if (!structuredData || typeof structuredData !== "object") return undefined;
+  const data = structuredData as Record<string, unknown>;
+  return data[camelKey] ?? (snakeKey ? data[snakeKey] : undefined);
+};
+
+const getStructuredStringArray = (
+  structuredData: unknown,
+  camelKey: string,
+  snakeKey?: string,
+): string[] => {
+  const raw = getStructuredField(structuredData, camelKey, snakeKey);
+  return toSafeStringArray(raw);
+};
+
 /**
  * 笔记详情页面组件
  */
@@ -504,14 +523,29 @@ export default function NoteDetailScreen() {
             {note.structuredData ? (
               <>
                 {/* AI 摘要 */}
-                <NoteSummaryCard summary={note.structuredData.summary} />
+                <NoteSummaryCard
+                  summary={getStructuredField(
+                    note.structuredData,
+                    "summary",
+                  )}
+                />
 
                 {/* 知识要点 */}
-                <NoteKeyPoints keyPoints={note.structuredData.keyPoints} />
+                <NoteKeyPoints
+                  keyPoints={getStructuredStringArray(
+                    note.structuredData,
+                    "keyPoints",
+                    "key_points",
+                  )}
+                />
 
                 {/* 学习建议 */}
                 <NoteStudyAdvice
-                  studyAdvice={note.structuredData.studyAdvice}
+                  studyAdvice={getStructuredField(
+                    note.structuredData,
+                    "studyAdvice",
+                    "study_advice",
+                  )}
                 />
 
                 {/* AI 处理警告 */}
