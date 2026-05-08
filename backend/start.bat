@@ -1,5 +1,12 @@
 @echo off
-cd /d "D:\ai_note_app\backend"
-call venv\Scripts\activate
-set PATH=%USERPROFILE%\.cargo\bin;%PATH%
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+setlocal
+
+cd /d "%~dp0"
+
+if exist ".venv\Scripts\activate.bat" (
+    call ".venv\Scripts\activate.bat"
+) else if exist "venv\Scripts\activate.bat" (
+    call "venv\Scripts\activate.bat"
+)
+
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000

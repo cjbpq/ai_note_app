@@ -23,29 +23,25 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
 
     # Security
-    # ????: SECRET_KEY ?????? "your-secret-key-change-in-production", ???????? JWT token
-    # ????: ?????????, ?????????????
-    # ????: ???????????, ?????????. ?? Field(...) ???????
+    # SECRET_KEY is required. Do not use a hard-coded production fallback for JWT signing.
     SECRET_KEY: str = Field(
-        ...,  # ????, ?????????
-        min_length=32,  # ???? 32 ??, ??????
-        description="JWT ???? (?????????, ?? python -c \"import secrets; print(secrets.token_urlsafe(32))\" ??)",
+        ...,
+        min_length=32,
+        description='JWT signing key. Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"',
     )
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
 
-    # ????: CORS ??????, ???????? (allow_origins=["*"])
-    # ????: ??????????, ?? CSRF ??
-    # ????: allow_origins=["*"] + allow_credentials=True ??????????????? cookies ????? API
+    # Comma-separated CORS origins. Avoid wildcard origins for credentialed APIs.
     ALLOWED_ORIGINS: str = Field(
         default="http://localhost:3000,http://localhost:5173",
-        description="??? CORS ? (????). ?????????????? (? https://app.example.com)",
+        description="Allowed CORS origins separated by commas.",
     )
 
-    # Timezone (?? API ??????????????????)
+    # Timezone used when formatting API timestamps.
     TIMEZONE: str = "Asia/Shanghai"
 
-    # ?????? (SMTP)
+    # Email delivery (SMTP)
     SMTP_HOST: str = "smtp.exmail.qq.com"
     SMTP_PORT: int = 465
     SMTP_USE_SSL: bool = True
@@ -56,6 +52,24 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "postgresql+psycopg://postgres:postgres@localhost:5432/ai_note_app"
     UPLOAD_DIR: str = "/var/www/ai_note_app/shared/uploaded_images"
+
+    # Note-aware chat/RAG configuration
+    NEXORADB_URL: Optional[str] = None
+    NEXORADB_API_KEY: Optional[str] = None
+    CHAT_RAG_TOP_K: int = 8
+    CHAT_RAG_MAX_CHUNKS: int = 6
+    CHAT_RAG_MAX_NOTES: int = 4
+    CHAT_RAG_MAX_CONTEXT_CHARS: int = 12000
+    CHAT_HISTORY_CONTEXT_MESSAGES: int = 12
+    DOUBAO_CONTEXT_WINDOW_TOKENS: int = 256000
+    CHAT_COMPACT_KEEP_RECENT_MESSAGES: int = 12
+    CHAT_STREAM_HEARTBEAT_SECONDS: int = 12
+
+    # Web search tool configuration
+    WEB_SEARCH_ENABLED: bool = True
+    WEB_SEARCH_PROVIDER: str = "duckduckgo"
+    WEB_SEARCH_TIMEOUT_SECONDS: float = 8.0
+    WEB_SEARCH_MAX_RESULTS: int = 5
 
     # Doubao configuration
     USE_DOUBAO_PIPELINE: bool = True

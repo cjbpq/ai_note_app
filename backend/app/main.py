@@ -14,7 +14,7 @@ from app.api.v1.api import api_router
 from app.core.config import settings
 from app.core.exceptions import ServiceError
 from app.core.logging_config import setup_logging
-from app.database import Base, engine
+from app.database import Base, engine, ensure_sqlite_schema_compatibility
 from app import models  # noqa: F401
 
 logger = logging.getLogger(__name__)
@@ -85,6 +85,7 @@ async def lifespan(app: FastAPI):
     setup_logging()  # 初始化日志系统 (必须在第一步)
     logger.info("应用启动, 初始化数据库...")
     Base.metadata.create_all(bind=engine)
+    ensure_sqlite_schema_compatibility()
     logger.info("数据库初始化完成")
 
     yield  # 应用运行期间

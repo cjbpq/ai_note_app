@@ -18,6 +18,8 @@ from app.schemas.auth import (
     EmailSendCodeResponse,
     MessageResponse,
     ResetPasswordRequest,
+    UserPreferencesRequest,
+    UserPreferencesResponse,
 )
 from app.services.email_service import email_service
 from app.services.user_service import UserService
@@ -89,6 +91,36 @@ async def login_user(credentials: UserLogin, db: Session = Depends(get_db)):
 )
 async def read_current_user(current_user: User = Depends(get_current_user)):
     return current_user
+
+
+@router.get(
+    "/preferences",
+    response_model=UserPreferencesResponse,
+    summary="获取用户偏好",
+)
+async def get_preferences(current_user: User = Depends(get_current_user)):
+    return UserPreferencesResponse(chat_thinking_enabled=bool(current_user.chat_thinking_enabled))
+
+
+@router.put(
+    "/preferences",
+    response_model=UserPreferencesResponse,
+    summary="保存用户偏好",
+)
+async def update_preferences(
+    request: UserPreferencesRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = UserService(db)
+    db_user = service.get_user_by_id(current_user.id)
+    if not db_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="user not found")
+
+    db_user.chat_thinking_enabled = bool(request.chat_thinking_enabled)
+    db.commit()
+    db.refresh(db_user)
+    return UserPreferencesResponse(chat_thinking_enabled=bool(db_user.chat_thinking_enabled))
 
 
 @router.delete(
