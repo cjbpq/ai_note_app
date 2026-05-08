@@ -14,6 +14,7 @@ import {
   useTheme,
 } from "react-native-paper";
 import { useAuth } from "../../hooks/useAuth";
+import { useCategories } from "../../hooks/useCategories";
 import { useNotes } from "../../hooks/useNotes";
 import { useAuthStore } from "../../store/useAuthStore";
 
@@ -41,6 +42,7 @@ export default function SettingsScreen() {
   const { user, isAuthenticated } = useAuthStore();
   const { logout } = useAuth();
   const { notes } = useNotes();
+  const { categories } = useCategories();
   const router = useRouter();
 
   // 退出登录确认弹窗状态
@@ -51,10 +53,18 @@ export default function SettingsScreen() {
   // =========================================================================
   // 笔记数量：从 useNotes hook 获取实际数据
   const notesCount = notes?.length ?? 0;
-  // 分类数量：暂时使用固定值，后续可通过 API 获取
-  const categoriesCount = 0;
-  // 使用天数：暂时使用固定值，后续可根据注册日期计算
-  const daysUsed = 0;
+  // 分类数量：从分类聚合 Hook 获取实际数据
+  const categoriesCount = categories?.length ?? 0;
+  // 使用天数：根据后端返回的注册时间计算，含注册当天
+  const createdAt = user?.createdAt ?? user?.created_at;
+  const daysUsed = createdAt
+    ? Math.max(
+        1,
+        Math.ceil(
+          (Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24),
+        ),
+      )
+    : 0;
 
   // =========================================================================
   // 3. 事件处理
