@@ -39,7 +39,7 @@ export function BrandIntro({ ready }: BrandIntroProps) {
     >
       <View style={styles.logoShell}>
         <Image
-          source={require("../../assets/images/icon.png")}
+          source={require("../../assets/images/brand-intro-logo.png")}
           style={styles.logo}
           contentFit="contain"
         />
