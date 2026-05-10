@@ -5,6 +5,7 @@
  * import { LoadingScreen, ErrorScreen, GlobalSnackbar } from '@/components/common';
  */
 export { ErrorScreen } from "./ErrorScreen";
+export { BrandIntro } from "./BrandIntro";
 export { GlobalSnackbar } from "./GlobalSnackbar";
 export { ImageCarousel } from "./ImageCarousel";
 export { ImageViewerModal } from "./ImageViewerModal";

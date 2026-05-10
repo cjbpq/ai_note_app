@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "SnapNote邮雁智记",
+    "name": "SnapNote",
     "slug": "snap-note",
     "version": "0.2.0",
     "orientation": "portrait",
@@ -16,6 +16,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.cjbghy.smartnote",
+      "displayName": "SnapNote",
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "此应用需要使用相机拍摄笔记照片，以便进行文字识别和智能分析。Camera access is required to capture note photos for text recognition.",
