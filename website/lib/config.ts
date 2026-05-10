@@ -14,13 +14,13 @@ export const APP_CONFIG = {
   // ============================================
   // APK 下载链接 - 后续版本更新时修改这里
   // ============================================
-  APK_DOWNLOAD_URL: "https://github.com/cjbpq/ai_note_app/releases/download/v0.3.0-mvp/snapnote-android-v0.3.0-mvp.apk",
+  APK_DOWNLOAD_URL: "https://github.com/cjbpq/ai_note_app/releases/download/v0.3.1-mvp/snapnote-android-v0.3.1-mvp.apk",
   
   // APK 文件名（用于显示）
-  APK_FILENAME: "snapnote-android-v0.3.0-mvp.apk",
+  APK_FILENAME: "snapnote-android-v0.3.1-mvp.apk",
   
   // 当前版本号
-  VERSION: "v0.3.0-MVP",
+  VERSION: "v0.3.1-MVP",
   
   // GitHub 仓库地址
   GITHUB_URL: "https://github.com/cjbpq/ai_note_app",
