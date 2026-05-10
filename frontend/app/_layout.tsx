@@ -8,9 +8,8 @@ import {
 } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
-import { ActivityIndicator, View } from "react-native";
 import { MD3DarkTheme, MD3LightTheme, PaperProvider } from "react-native-paper";
-import { GlobalSnackbar, OfflineBanner } from "../components/common";
+import { BrandIntro, GlobalSnackbar, OfflineBanner } from "../components/common";
 import { useAndroidSystemNavigationBar } from "../hooks/useAndroidSystemNavigationBar";
 import { useThemeMode } from "../hooks/useThemeMode";
 import "../i18n"; // 初始化国际化配置
@@ -41,6 +40,7 @@ export default function RootLayout() {
   // 全局主题模式（MVP）：使用 Paper 内置 MD3 Light/Dark
   const { isDark } = useThemeMode();
   const paperTheme = isDark ? MD3DarkTheme : MD3LightTheme;
+  const isAppReady = !isRestoring && !!navigationState?.key;
 
   // Android 系统导航栏跟随主题，避免 auth 页面出现浅色底栏
   useAndroidSystemNavigationBar(isDark, paperTheme.colors.background);
@@ -134,14 +134,6 @@ export default function RootLayout() {
   }, [isAuthenticated, segments, navigationState?.key, isRestoring, router]);
 
   // 加载中显示
-  if (isRestoring || !navigationState?.key) {
-    return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <ActivityIndicator size="large" />
-      </View>
-    );
-  }
-
   return (
     <QueryClientProvider client={queryClient}>
       <PaperProvider theme={paperTheme}>
@@ -259,6 +251,7 @@ export default function RootLayout() {
         <OfflineBanner />
         {/* 全局 Snackbar 组件 - 放在 Stack 外部确保覆盖所有页面 */}
         <GlobalSnackbar />
+        <BrandIntro ready={isAppReady} />
       </PaperProvider>
     </QueryClientProvider>
   );
