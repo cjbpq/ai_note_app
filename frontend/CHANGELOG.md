@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-05-10
+
+### Added
+
+- **AI Chat System**: Introduced a complete AI chat experience with streaming responses, session continuity, message state handling, and mobile-first chat UI.
+- **Note-Aware Conversations**: Added support for starting chat from note details and attaching user-selected reference notes to conversation messages.
+- **Conversation History**: Added session history management, including loading previous conversations, continuing sessions, creating new sessions, and deleting sessions.
+- **AI Suggested Notes**: Added AI-generated note suggestion cards with save/dismiss actions, category selection, saved-note navigation, and historical state recovery.
+- **User Chat Preferences**: Added a user-level Deep Thinking preference connected to backend preference APIs.
+
+### Changed
+
+- **Brand Identity**: Updated the app display name to SnapNote and refreshed app icon, splash assets, and the lightweight brand intro experience.
+- **Rich Content Rendering**: Improved markdown and structured rich text rendering for note details and AI-generated note previews.
+- **Chat Reference UX**: Refined reference note chips, picker behavior, composer layout, keyboard handling, and historical reference recovery.
+
+### Fixed
+
+- **Profile Statistics**: Replaced mock profile statistics with real note, category, and usage-day data.
+- **Chat Stability**: Improved handling for stopped streams, network failures, stale attachment states, and historical suggestion card restoration.
+
 ## [0.2.0] - 2026-03-03
 
 ### Added

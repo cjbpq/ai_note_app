@@ -101,14 +101,15 @@ i18n/           # Internationalization (zh/en)
 
 ## 🔄 Version
 
-**Current version:** v0.2.0
+**Current version:** v0.3.1
 
 **Latest Updates:**
 
-- 📐 Expanded math formula rendering coverage across note content
-- 👤 Delivered MVP Profile (User Center) pages and navigation
-- 📶 Landed a full offline-first notes architecture with silent sync
-- 🔐 Integrated complete Auth APIs and UI flows (email verification)
+- 🤖 Added streaming AI Chat with conversation sessions
+- 🧩 Added note references and note-aware chat workflows
+- 📝 Added AI suggested notes with save/dismiss flow
+- 🕘 Added chat history recovery for references and suggestions
+- 🎨 Refreshed SnapNote branding, app icon, splash, and profile stats
 
 ---
 
