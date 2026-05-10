@@ -1,3 +1,4 @@
+import { AxiosError } from "axios";
 import { ENDPOINTS } from "../constants/config";
 import i18next from "../i18n";
 import {
@@ -9,9 +10,12 @@ import {
   EmailRegisterRequest,
   EmailSendCodeRequest,
   EmailSendCodeResponse,
+  FieldErrorMap,
   LoginResponse,
   MessageResponse,
   ResetPasswordRequest,
+  ServiceError,
+  ToastType,
   TokenRefreshResponse,
   User,
   UserPreferencesRequest,
@@ -23,6 +27,125 @@ import { parseServiceError } from "./errorService";
 import { tokenService } from "./tokenService";
 
 const USE_MOCK = process.env.EXPO_PUBLIC_USE_MOCK === "true";
+
+const getBackendDetail = (error: unknown): string | undefined => {
+  if (!(error instanceof AxiosError)) return undefined;
+  const detail = (error.response?.data as any)?.detail;
+  if (typeof detail === "string") return detail;
+  return undefined;
+};
+
+const buildAuthError = (params: {
+  key: string;
+  toastType?: ToastType;
+  statusCode?: number;
+  fieldErrors?: FieldErrorMap;
+  retryable?: boolean;
+}): ServiceError =>
+  new ServiceError({
+    message: i18next.t(params.key),
+    i18nKey: params.key,
+    toastType: params.toastType ?? "error",
+    statusCode: params.statusCode,
+    fieldErrors: params.fieldErrors,
+    retryable: params.retryable,
+  });
+
+const mapAuthDetailError = (
+  error: unknown,
+  fallbackKey: string,
+  options?: {
+    emailExistsKey?: string;
+  },
+): ServiceError | undefined => {
+  if (!(error instanceof AxiosError) || !error.response) return undefined;
+
+  const statusCode = error.response.status;
+  const detail = getBackendDetail(error) ?? "";
+
+  if (statusCode === 429 || detail.includes("频繁")) {
+    return buildAuthError({
+      key: "error.common.rateLimited",
+      toastType: "warning",
+      statusCode,
+      retryable: true,
+    });
+  }
+
+  if (detail.includes("用户名")) {
+    return buildAuthError({
+      key: "error.auth.userExists",
+      toastType: "warning",
+      statusCode,
+      fieldErrors: { username: i18next.t("error.auth.userExists") },
+    });
+  }
+
+  if (detail.includes("未注册")) {
+    return buildAuthError({
+      key: "error.auth.emailNotRegistered",
+      toastType: "warning",
+      statusCode,
+      fieldErrors: { email: i18next.t("error.auth.emailNotRegistered") },
+    });
+  }
+
+  if (detail.includes("已被注册") || detail.includes("已注册")) {
+    const key = options?.emailExistsKey ?? "error.auth.emailExists";
+    return buildAuthError({
+      key,
+      toastType: "warning",
+      statusCode,
+      fieldErrors: { email: i18next.t(key) },
+    });
+  }
+
+  if (detail.includes("绑定")) {
+    return buildAuthError({
+      key: "error.auth.emailAlreadyBound",
+      toastType: "warning",
+      statusCode,
+      fieldErrors: { email: i18next.t("error.auth.emailAlreadyBound") },
+    });
+  }
+
+  if (detail.includes("旧密码") || detail.includes("当前密码")) {
+    return buildAuthError({
+      key: "error.auth.wrongOldPassword",
+      toastType: "error",
+      statusCode,
+      fieldErrors: { password: i18next.t("error.auth.wrongOldPassword") },
+    });
+  }
+
+  if (detail.includes("验证码")) {
+    let key = "error.auth.invalidCode";
+    if (detail.includes("过期")) key = "error.auth.codeExpired";
+    else if (detail.includes("次数")) key = "error.auth.codeTooManyAttempts";
+    else if (detail.includes("错误")) key = "error.auth.codeWrong";
+    else if (detail.includes("不存在") || detail.includes("已使用")) {
+      key = "error.auth.codeUsed";
+    }
+
+    return buildAuthError({
+      key,
+      toastType: key === "error.auth.codeTooManyAttempts" ? "warning" : "error",
+      statusCode,
+      fieldErrors: { code: i18next.t(key) },
+      retryable: key === "error.auth.codeTooManyAttempts",
+    });
+  }
+
+  if (detail) {
+    return buildAuthError({
+      key: fallbackKey,
+      toastType: statusCode === 400 ? "warning" : "error",
+      statusCode,
+    });
+  }
+
+  return undefined;
+};
 
 export const authService = {
   /**
@@ -266,6 +389,17 @@ export const authService = {
       );
       return response as unknown as EmailSendCodeResponse;
     } catch (error) {
+      const detailError = mapAuthDetailError(
+        error,
+        "error.auth.sendCodeFailed",
+        {
+          emailExistsKey:
+            req.purpose === "change_email"
+              ? "error.auth.emailAlreadyBound"
+              : "error.auth.emailExists",
+        },
+      );
+      if (detailError) throw detailError;
       throw parseServiceError(error, {
         fallbackKey: "error.auth.sendCodeFailed",
         statusMap: {
@@ -313,6 +447,11 @@ export const authService = {
       );
       return response as unknown as UserResponse;
     } catch (error) {
+      const detailError = mapAuthDetailError(
+        error,
+        "error.auth.registerFailed",
+      );
+      if (detailError) throw detailError;
       throw parseServiceError(error, {
         fallbackKey: "error.auth.registerFailed",
         statusMap: {
@@ -391,6 +530,11 @@ export const authService = {
 
       return { token: accessToken, user };
     } catch (error) {
+      const detailError = mapAuthDetailError(
+        error,
+        "error.auth.emailLoginFailed",
+      );
+      if (detailError) throw detailError;
       throw parseServiceError(error, {
         fallbackKey: "error.auth.emailLoginFailed",
         statusMap: {
@@ -561,6 +705,11 @@ export const authService = {
       );
       return response as unknown as MessageResponse;
     } catch (error) {
+      const detailError = mapAuthDetailError(
+        error,
+        "error.auth.resetPasswordFailed",
+      );
+      if (detailError) throw detailError;
       throw parseServiceError(error, {
         fallbackKey: "error.auth.resetPasswordFailed",
         statusMap: {
@@ -643,6 +792,12 @@ export const authService = {
       );
       return response as unknown as ChangeEmailResponse;
     } catch (error) {
+      const detailError = mapAuthDetailError(
+        error,
+        "error.auth.changeEmailFailed",
+        { emailExistsKey: "error.auth.emailAlreadyBound" },
+      );
+      if (detailError) throw detailError;
       throw parseServiceError(error, {
         fallbackKey: "error.auth.changeEmailFailed",
         statusMap: {

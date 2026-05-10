@@ -128,7 +128,10 @@ export default function RootLayout() {
       router.replace("/login" as Href);
     }
     // 已登录且在登录页 -> 跳转主页
-    else if (isAuthenticated && segments[0] === "login") {
+    else if (
+      isAuthenticated &&
+      (segments[0] === "login" || segments[0] === "forgot-password")
+    ) {
       router.replace("/(tabs)" as Href);
     }
   }, [isAuthenticated, segments, navigationState?.key, isRestoring, router]);
@@ -167,6 +170,14 @@ export default function RootLayout() {
           {/* 注册页面 */}
           <Stack.Screen
             name="register"
+            options={{
+              headerShown: false,
+              animation: "fade",
+              animationDuration: 200,
+            }}
+          />
+          <Stack.Screen
+            name="forgot-password"
             options={{
               headerShown: false,
               animation: "fade",

@@ -1,9 +1,7 @@
-import { useRouter } from "expo-router";
+import { Href, useRouter } from "expo-router";
 import React, {
   useCallback,
-  useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -24,6 +22,7 @@ import {
 } from "react-native-paper";
 import { APP_CONFIG } from "../constants/config";
 import { useAuth } from "../hooks/useAuth";
+import { useVerificationCooldown } from "../hooks/useVerificationCooldown";
 import { ServiceError } from "../types";
 
 /**
@@ -62,32 +61,10 @@ export default function LoginScreen() {
   const [email, setEmail] = useState("");
   const [verifyCode, setVerifyCode] = useState("");
 
-  // ── 验证码倒计时 ──────────────────────────────
-  const [cooldown, setCooldown] = useState(0);
-  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  /** 卸载时清理倒计时定时器 */
-  useEffect(() => {
-    return () => {
-      if (cooldownRef.current) clearInterval(cooldownRef.current);
-    };
-  }, []);
-
-  /** 启动冷却倒计时 */
-  const startCooldown = useCallback(() => {
-    setCooldown(APP_CONFIG.VALIDATION.VERIFY_CODE_COOLDOWN);
-    if (cooldownRef.current) clearInterval(cooldownRef.current);
-    cooldownRef.current = setInterval(() => {
-      setCooldown((prev) => {
-        if (prev <= 1) {
-          if (cooldownRef.current) clearInterval(cooldownRef.current);
-          cooldownRef.current = null;
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }, []);
+  const { cooldown, isCoolingDown, startCooldown } = useVerificationCooldown(
+    "login",
+    email,
+  );
 
   // ── 邮箱格式校验 ──────────────────────────────
   const isEmailValid = useMemo(() => {
@@ -123,22 +100,22 @@ export default function LoginScreen() {
 
   /** 发送验证码（purpose = "login"） */
   const handleSendCode = useCallback(() => {
-    if (!isEmailValid || cooldown > 0 || isSendingCode) return;
+    if (!isEmailValid || isCoolingDown || isSendingCode) return;
     sendCode(
-      { email, purpose: "login" },
+      { email: email.trim(), purpose: "login" },
       {
         onSuccess: () => {
           startCooldown();
         },
       },
     );
-  }, [email, isEmailValid, cooldown, isSendingCode, sendCode, startCooldown]);
+  }, [email, isEmailValid, isCoolingDown, isSendingCode, sendCode, startCooldown]);
 
   /** 邮箱验证码登录 */
   const handleEmailLogin = useCallback(() => {
     if (!isEmailValid || !isCodeValid) return;
     emailLogin(
-      { email, code: verifyCode },
+      { email: email.trim(), code: verifyCode },
       {
         onSuccess: () => {
           router.replace("/(tabs)");
@@ -270,7 +247,7 @@ export default function LoginScreen() {
               {/* 忘记密码？使用验证码登录 — 点击切换到验证码 Tab */}
               <Button
                 mode="text"
-                onPress={() => setActiveTab("emailCode")}
+                onPress={() => router.push("/forgot-password" as Href)}
                 style={styles.forgotButton}
                 labelStyle={styles.forgotLabel}
                 compact
@@ -294,12 +271,22 @@ export default function LoginScreen() {
                 autoCapitalize="none"
                 mode="outlined"
                 style={styles.input}
-                error={email.length > 0 && !isEmailValid}
+                error={
+                  (email.length > 0 && !isEmailValid) ||
+                  (emailLoginError instanceof ServiceError &&
+                    !!emailLoginError.fieldErrors?.email)
+                }
                 left={<TextInput.Icon icon="email" />}
               />
               {email.length > 0 && !isEmailValid ? (
                 <HelperText type="error" visible>
                   {t("auth.validation.email_invalid")}
+                </HelperText>
+              ) : null}
+              {emailLoginError instanceof ServiceError &&
+              !!emailLoginError.fieldErrors?.email ? (
+                <HelperText type="error" visible>
+                  {emailLoginError.fieldErrors.email}
                 </HelperText>
               ) : null}
 
@@ -317,7 +304,11 @@ export default function LoginScreen() {
                   maxLength={APP_CONFIG.VALIDATION.VERIFY_CODE_LENGTH}
                   mode="outlined"
                   style={styles.codeInput}
-                  error={shouldShowCodeError}
+                  error={
+                    shouldShowCodeError ||
+                    (emailLoginError instanceof ServiceError &&
+                      !!emailLoginError.fieldErrors?.code)
+                  }
                   left={<TextInput.Icon icon="shield-key" />}
                 />
                 <Button
@@ -335,6 +326,12 @@ export default function LoginScreen() {
               {shouldShowCodeError ? (
                 <HelperText type="error" visible>
                   {t("auth.validation.code_invalid")}
+                </HelperText>
+              ) : null}
+              {emailLoginError instanceof ServiceError &&
+              !!emailLoginError.fieldErrors?.code ? (
+                <HelperText type="error" visible>
+                  {emailLoginError.fieldErrors.code}
                 </HelperText>
               ) : null}
 

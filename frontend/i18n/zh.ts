@@ -95,6 +95,11 @@ export default {
       userExists: "用户名已存在，请更换后重试",
       emailExists: "该邮箱已被注册，请更换邮箱或直接登录",
       invalidCode: "验证码无效或已过期，请重新获取",
+      codeWrong: "验证码错误，请检查后重试",
+      codeExpired: "验证码已过期，请重新获取",
+      codeUsed: "验证码不存在或已使用，请重新获取",
+      codeTooManyAttempts: "验证码尝试次数过多，请重新获取",
+      emailNotRegistered: "该邮箱未注册，请先注册账号",
       sendCodeFailed: "发送验证码失败，请稍后重试",
       changePasswordFailed: "修改密码失败，请稍后重试",
       resetPasswordFailed: "重置密码失败，请稍后重试",
@@ -202,7 +207,7 @@ export default {
     register_button: "注册",
     tab_password: "密码登录",
     tab_email_code: "验证码登录",
-    forgot_password_hint: "忘记密码？使用验证码登录",
+    forgot_password_hint: "忘记密码？",
     switch_to_register: "没有账号？去注册",
     switch_to_login: "已有账号？去登录",
     validation: {
@@ -586,6 +591,7 @@ export default {
     reset_password_button: "确认重置",
     reset_password_success: "密码重置成功",
     reset_email_hint: "验证码将发送到你的账号绑定邮箱",
+    reset_password_guest_hint: "输入注册邮箱，通过验证码设置新密码",
     // 修改绑定邮箱页
     change_email_title: "修改绑定邮箱",
     current_email_label: "当前绑定邮箱",

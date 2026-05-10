@@ -1,9 +1,7 @@
 import { useRouter } from "expo-router";
 import React, {
   useCallback,
-  useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -23,6 +21,7 @@ import {
 } from "react-native-paper";
 import { APP_CONFIG } from "../constants/config";
 import { useAuth } from "../hooks/useAuth";
+import { useVerificationCooldown } from "../hooks/useVerificationCooldown";
 import { ServiceError } from "../types";
 
 /**
@@ -53,32 +52,10 @@ export default function RegisterScreen() {
   const [isConfirmPasswordVisible, setIsConfirmPasswordVisible] =
     useState(false);
 
-  // ── 验证码倒计时状态 ──────────────────────────────
-  const [cooldown, setCooldown] = useState(0);
-  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  /** 卸载时清理倒计时定时器，防止内存泄漏 */
-  useEffect(() => {
-    return () => {
-      if (cooldownRef.current) clearInterval(cooldownRef.current);
-    };
-  }, []);
-
-  /** 启动 60 秒倒计时 */
-  const startCooldown = useCallback(() => {
-    setCooldown(APP_CONFIG.VALIDATION.VERIFY_CODE_COOLDOWN);
-    if (cooldownRef.current) clearInterval(cooldownRef.current);
-    cooldownRef.current = setInterval(() => {
-      setCooldown((prev) => {
-        if (prev <= 1) {
-          if (cooldownRef.current) clearInterval(cooldownRef.current);
-          cooldownRef.current = null;
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }, []);
+  const { cooldown, isCoolingDown, startCooldown } = useVerificationCooldown(
+    "register",
+    email,
+  );
 
   // ── 校验逻辑 ──────────────────────────────
 
@@ -151,9 +128,9 @@ export default function RegisterScreen() {
 
   /** 发送验证码 — 只要邮箱合法且不在冷却中即可触发 */
   const handleSendCode = useCallback(() => {
-    if (!isEmailValid || cooldown > 0 || isSendingCode) return;
+    if (!isEmailValid || isCoolingDown || isSendingCode) return;
     sendCode(
-      { email, purpose: "register" },
+      { email: email.trim(), purpose: "register" },
       {
         onSuccess: () => {
           // 成功后启动前端倒计时
@@ -161,13 +138,13 @@ export default function RegisterScreen() {
         },
       },
     );
-  }, [email, isEmailValid, cooldown, isSendingCode, sendCode, startCooldown]);
+  }, [email, isEmailValid, isCoolingDown, isSendingCode, sendCode, startCooldown]);
 
   /** 提交邮箱验证码注册 */
   const handleRegister = useCallback(() => {
     if (hasErrors) return;
     emailRegister(
-      { email, code: verifyCode, username, password },
+      { email: email.trim(), code: verifyCode, username: username.trim(), password },
       {
         onSuccess: () => {
           // 注册成功 → 跳转登录页
@@ -277,7 +254,11 @@ export default function RegisterScreen() {
               maxLength={APP_CONFIG.VALIDATION.VERIFY_CODE_LENGTH}
               mode="outlined"
               style={styles.codeInput}
-              error={shouldShowCodeError}
+              error={
+                shouldShowCodeError ||
+                (regError instanceof ServiceError &&
+                  !!regError.fieldErrors?.code)
+              }
               left={<TextInput.Icon icon="shield-key" />}
             />
             <Button
@@ -295,6 +276,11 @@ export default function RegisterScreen() {
           {shouldShowCodeError ? (
             <HelperText type="error" visible>
               {t("auth.validation.code_invalid")}
+            </HelperText>
+          ) : null}
+          {regError instanceof ServiceError && !!regError.fieldErrors?.code ? (
+            <HelperText type="error" visible>
+              {regError.fieldErrors?.code}
             </HelperText>
           ) : null}
 

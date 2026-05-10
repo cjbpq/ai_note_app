@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   KeyboardAvoidingView,
@@ -19,6 +19,7 @@ import {
 } from "react-native-paper";
 import { APP_CONFIG } from "../constants/config";
 import { useAuth } from "../hooks/useAuth";
+import { useVerificationCooldown } from "../hooks/useVerificationCooldown";
 import { useAuthStore } from "../store/useAuthStore";
 
 /**
@@ -68,9 +69,10 @@ export default function ChangePasswordScreen() {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  // 验证码倒计时
-  const [cooldown, setCooldown] = useState(0);
-  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const { cooldown, isCoolingDown, startCooldown } = useVerificationCooldown(
+    "reset_password",
+    user?.email ?? "",
+  );
 
   // ========================================
   // 成功后自动返回上一页
@@ -81,29 +83,6 @@ export default function ChangePasswordScreen() {
       return () => clearTimeout(timer);
     }
   }, [isChangePasswordSuccess, isResetPasswordSuccess, router]);
-
-  // ========================================
-  // 验证码倒计时逻辑（复用注册页方案）
-  // ========================================
-  const startCooldown = useCallback(() => {
-    setCooldown(APP_CONFIG.VALIDATION.VERIFY_CODE_COOLDOWN);
-    cooldownRef.current = setInterval(() => {
-      setCooldown((prev) => {
-        if (prev <= 1) {
-          if (cooldownRef.current) clearInterval(cooldownRef.current);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }, []);
-
-  // 清理倒计时
-  useEffect(() => {
-    return () => {
-      if (cooldownRef.current) clearInterval(cooldownRef.current);
-    };
-  }, []);
 
   // ========================================
   // 表单校验
@@ -128,12 +107,12 @@ export default function ChangePasswordScreen() {
   // 发送验证码（重置密码模式）
   // ========================================
   const handleSendCode = useCallback(() => {
-    if (!user?.email || cooldown > 0 || isSendingCode) return;
+    if (!user?.email || isCoolingDown || isSendingCode) return;
     sendCode(
       { email: user.email, purpose: "reset_password" },
       { onSuccess: () => startCooldown() },
     );
-  }, [user?.email, cooldown, isSendingCode, sendCode, startCooldown]);
+  }, [user?.email, isCoolingDown, isSendingCode, sendCode, startCooldown]);
 
   // ========================================
   // 提交表单

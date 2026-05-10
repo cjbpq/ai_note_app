@@ -98,6 +98,13 @@ export default {
         "This email is already registered. Please use another or login",
       invalidCode:
         "Verification code is invalid or expired. Please request a new one",
+      codeWrong: "Verification code is incorrect. Please check and try again",
+      codeExpired: "Verification code has expired. Please request a new one",
+      codeUsed:
+        "Verification code does not exist or has already been used. Please request a new one",
+      codeTooManyAttempts:
+        "Too many verification attempts. Please request a new code",
+      emailNotRegistered: "This email is not registered. Please sign up first",
       sendCodeFailed:
         "Failed to send verification code. Please try again later",
       changePasswordFailed: "Failed to change password. Please try again",
@@ -210,7 +217,7 @@ export default {
     register_button: "Register",
     tab_password: "Password",
     tab_email_code: "Email Code",
-    forgot_password_hint: "Forgot password? Use email code login",
+    forgot_password_hint: "Forgot password?",
     switch_to_register: "No account? Go to register",
     switch_to_login: "Have an account? Go to login",
     validation: {
@@ -594,6 +601,8 @@ export default {
     reset_password_button: "Confirm Reset",
     reset_password_success: "Password reset successfully",
     reset_email_hint: "Verification code will be sent to your bound email",
+    reset_password_guest_hint:
+      "Enter your registered email and set a new password with a verification code",
     change_email_title: "Change Email",
     current_email_label: "Current Email",
     new_email_label: "New Email",

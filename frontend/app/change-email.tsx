@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   KeyboardAvoidingView,
@@ -19,6 +19,7 @@ import {
 } from "react-native-paper";
 import { APP_CONFIG } from "../constants/config";
 import { useAuth } from "../hooks/useAuth";
+import { useVerificationCooldown } from "../hooks/useVerificationCooldown";
 import { useAuthStore } from "../store/useAuthStore";
 
 // 简易邮箱格式校验
@@ -53,32 +54,10 @@ export default function ChangeEmailScreen() {
   const [emailCode, setEmailCode] = useState("");
   const initialEmailRef = useRef((user?.email ?? "").trim().toLowerCase());
 
-  // 验证码倒计时
-  const [cooldown, setCooldown] = useState(0);
-  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // ========================================
-  // 验证码倒计时逻辑
-  // ========================================
-  const startCooldown = useCallback(() => {
-    setCooldown(APP_CONFIG.VALIDATION.VERIFY_CODE_COOLDOWN);
-    cooldownRef.current = setInterval(() => {
-      setCooldown((prev) => {
-        if (prev <= 1) {
-          if (cooldownRef.current) clearInterval(cooldownRef.current);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }, []);
-
-  // 清理倒计时
-  useEffect(() => {
-    return () => {
-      if (cooldownRef.current) clearInterval(cooldownRef.current);
-    };
-  }, []);
+  const { cooldown, startCooldown } = useVerificationCooldown(
+    "change_email",
+    newEmail,
+  );
 
   // ========================================
   // 表单校验
