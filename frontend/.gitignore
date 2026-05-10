@@ -54,3 +54,11 @@ app-example
 
 # Log
 /LOG/
+
+
+#/chore
+.codex/
+.github/skills/
+AGENTS.md
+.github/copilot-instructions.md
+.vscode/
